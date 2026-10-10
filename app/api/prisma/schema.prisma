@@ -1,0 +1,30 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Pattern {
+  id          String   @id @default(uuid()) @db.Uuid
+  slug        String   @unique
+  title       String?
+  generatorId String
+  params      Json
+  playCount   Int      @default(0)
+  remixCount  Int      @default(0)
+  isPublic    Boolean  @default(true)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  parentId String?   @db.Uuid
+  parent   Pattern?  @relation("Remixes", fields: [parentId], references: [id], onDelete: SetNull)
+  remixes  Pattern[] @relation("Remixes")
+
+  @@index([createdAt(sort: Desc), id(sort: Desc)])
+  @@index([playCount(sort: Desc), id(sort: Desc)])
+  @@index([parentId])
+  @@map("patterns")
+}
