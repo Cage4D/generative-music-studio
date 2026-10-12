@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Arpeggio test</title>
+<style>
+:root{--bg:#fff;--fg:#1a1a1a;--mut:#666;--line:#ddd;--acc:#4a3fd8;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#15151a;--fg:#eee;--mut:#9a9aa5;--line:#33333c;--acc:#8b83ff}}
+:root[data-theme="dark"]{--bg:#15151a;--fg:#eee;--mut:#9a9aa5;--line:#33333c;--acc:#8b83ff}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,sans-serif;margin:0;padding:16px;max-width:640px;margin-inline:auto}
+h1{font-size:18px;margin:0 0 4px}p.s{color:var(--mut);margin:0 0 16px;font-size:13px}
+.row{display:grid;grid-template-columns:110px 1fr 56px;gap:8px;align-items:center;margin:6px 0}
+.row label{color:var(--mut);font-size:13px}.row output{font-variant-numeric:tabular-nums;text-align:right;font-size:13px}
+select,input[type=number]{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:4px;width:100%}
+input[type=range]{width:100%;accent-color:var(--acc)}
+button{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:10px 18px;font-size:15px;cursor:pointer}
+button.g{background:transparent;color:var(--fg);border:1px solid var(--line)}
+.bar{display:flex;gap:8px;margin:16px 0;flex-wrap:wrap;align-items:center}
+pre{border:1px solid var(--line);border-radius:8px;padding:10px;overflow-x:auto;font-size:12px;margin:8px 0}
+h2{font-size:13px;color:var(--mut);margin:18px 0 4px;text-transform:uppercase;letter-spacing:.05em}
+#steps{display:grid;grid-template-columns:repeat(16,1fr);gap:3px;margin:8px 0}
+#steps div{aspect-ratio:1;border:1px solid var(--line);border-radius:3px;font-size:9px;display:flex;align-items:center;justify-content:center;color:var(--mut)}
+#steps div.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+#steps div.now{outline:2px solid var(--fg)}
+</style>
+</head>
+<body>
+<h1>Arpeggio generator test</h1>
+<p class="s">Seeded PRNG decides every note. Tone.js only plays the finished list.</p>
+
+<div class="bar"><button id="play">Play</button><button class="g" id="rand">Random seed</button><span id="hash" style="color:var(--mut);font-size:13px"></span></div>
+<div id="steps"></div>
+
+<h2>Shared params</h2>
+<div id="ui"></div>
+
+<h2>Params (what the backend would store)</h2>
+<pre id="json"></pre>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+<script>
+// ---------- seeded PRNG ----------
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+
+const NOTES=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+const SCALES={major:[0,2,4,5,7,9,11],minor:[0,2,3,5,7,8,10],dorian:[0,2,3,5,7,9,10],phrygian:[0,1,3,5,7,8,10],lydian:[0,2,4,6,7,9,11],mixolydian:[0,2,4,5,7,9,10],"pentatonic-major":[0,2,4,7,9],"pentatonic-minor":[0,3,5,7,10]};
+const STEPS=16;
+
+const p={generatorId:"arpeggio",params:{seed:1839204412,tempo:96,root:"D",scale:"dorian",density:0.6,swing:0.1,
+  effects:{reverb:0.35,delay:0.2},arpeggio:{pattern:"up-down",octaves:2,stepLength:"16n"}}};
+
+// ---------- the generator: params -> list of events (pure, deterministic) ----------
+function generate(params){
+  const rand=mulberry32(params.seed);
+  const iv=SCALES[params.scale], rootPc=NOTES.indexOf(params.root);
+  const pool=[];
+  for(let o=0;o<params.arpeggio.octaves;o++) for(const d of iv) pool.push(48+rootPc+o*12+d);
+  const n=pool.length; let order=[];
+  const pat=params.arpeggio.pattern;
+  if(pat==="up") for(let i=0;i<n;i++) order.push(i);
+  else if(pat==="down") for(let i=n-1;i>=0;i--) order.push(i);
+  else if(pat==="up-down"){for(let i=0;i<n;i++) order.push(i);for(let i=n-2;i>0;i--) order.push(i)}
+  const ev=[];
+  for(let s=0;s<STEPS;s++){
+    // always draw the same number of randoms per step so changing density keeps note choices stable
+    const rRest=rand(), rNote=rand(), rVel=rand();
+    const idx=pat==="random"?Math.floor(rNote*n):order[s%order.length];
+    ev.push(rRest<params.density?{midi:pool[idx],vel:0.5+rVel*0.5}:null);
+  }
+  return ev;
+}
+const hash=s=>{let h=2166136261;for(const c of s){h^=c.charCodeAt(0);h=Math.imul(h,16777619)}return(h>>>0).toString(16)};
+
+// ---------- audio ----------
+let synth,delay,reverb,seq,playing=false,started=false;
+async function build(){
+  reverb=new Tone.Reverb({decay:3,wet:0}); await reverb.ready;
+  delay=new Tone.FeedbackDelay({delayTime:"8n.",feedback:0.35,wet:0});
+  synth=new Tone.Synth({oscillator:{type:"triangle"},envelope:{attack:0.01,decay:0.15,sustain:0.2,release:0.4}});
+  synth.chain(delay,reverb,Tone.Destination);
+}
+function applyLive(){
+  const q=p.params;
+  Tone.Transport.bpm.value=q.tempo;
+  Tone.Transport.swing=q.swing; Tone.Transport.swingSubdivision=q.arpeggio.stepLength;
+  if(reverb) reverb.wet.value=q.effects.reverb||0;
+  if(delay) delay.wet.value=q.effects.delay||0;
+}
+function rebuildSeq(){
+  const events=generate(p.params);
+  if(seq){seq.stop();seq.dispose()}
+  if(started){
+    seq=new Tone.Sequence((time,ev)=>{
+      if(!ev) return;
+      synth.triggerAttackRelease(Tone.Frequency(ev.midi,"midi").toNote(),p.params.arpeggio.stepLength,time,ev.vel);
+    },events,p.params.arpeggio.stepLength);
+    seq.loop=true;
+    seq.start(0);
+    // visual playhead
+    let i=0; seq.callback=((orig)=>(time,ev)=>{const k=i++%STEPS;Tone.Draw.schedule(()=>mark(k),time);orig(time,ev)})(seq.callback);
+  }
+}
+function mark(k){document.querySelectorAll("#steps div").forEach((d,i)=>d.classList.toggle("now",i===k))}
+
+// ---------- UI ----------
+function render(){
+  const ev=generate(p.params);
+  const names=ev.map(e=>e?Tone.Frequency(e.midi,"midi").toNote():"");
+  document.getElementById("steps").innerHTML=ev.map((e,i)=>`<div class="${e?"on":""}">${names[i]}</div>`).join("");
+  document.getElementById("hash").textContent="event hash: "+hash(JSON.stringify(ev));
+  document.getElementById("json").textContent=JSON.stringify(p,null,2);
+}
+const ui=document.getElementById("ui");
+function slider(label,get,set,min,max,step){
+  const r=document.createElement("div");r.className="row";
+  r.innerHTML=`<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}" value="${get()}"><output>${get()}</output>`;
+  const inp=r.querySelector("input"),out=r.querySelector("output");
+  inp.oninput=()=>{set(+inp.value);out.textContent=inp.value;update()};
+  ui.appendChild(r);return inp;
+}
+function select(label,get,set,opts){
+  const r=document.createElement("div");r.className="row";
+  r.innerHTML=`<label>${label}</label><select>${opts.map(o=>`<option ${o===get()?"selected":""}>${o}</option>`).join("")}</select><span></span>`;
+  r.querySelector("select").onchange=e=>{set(e.target.value);update()};
+  ui.appendChild(r);
+}
+const P=p.params;
+const seedInput=slider("seed",()=>P.seed,v=>P.seed=v,0,4294967295,1);
+slider("tempo",()=>P.tempo,v=>P.tempo=v,40,220,1);
+select("root",()=>P.root,v=>P.root=v,NOTES);
+select("scale",()=>P.scale,v=>P.scale=v,Object.keys(SCALES));
+slider("density",()=>P.density,v=>P.density=v,0,1,0.05);
+slider("swing",()=>P.swing,v=>P.swing=v,0,1,0.05);
+slider("reverb",()=>P.effects.reverb,v=>P.effects.reverb=v,0,1,0.05);
+slider("delay",()=>P.effects.delay,v=>P.effects.delay=v,0,1,0.05);
+select("pattern",()=>P.arpeggio.pattern,v=>P.arpeggio.pattern=v,["up","down","up-down","random"]);
+slider("octaves",()=>P.arpeggio.octaves,v=>P.arpeggio.octaves=v,1,4,1);
+select("stepLength",()=>P.arpeggio.stepLength,v=>P.arpeggio.stepLength=v,["4n","8n","16n","32n"]);
+
+function update(){render();applyLive();if(started)rebuildSeq()}
+
+document.getElementById("rand").onclick=()=>{
+  P.seed=Math.floor(Math.random()*4294967296);
+  const inp=seedInput;inp.value=P.seed;inp.nextElementSibling.textContent=P.seed;update();
+};
+document.getElementById("play").onclick=async e=>{
+  if(!started){await Tone.start();await build();started=true;applyLive();rebuildSeq()}
+  if(!playing){Tone.Transport.start();playing=true;e.target.textContent="Stop"}
+  else{Tone.Transport.stop();playing=false;e.target.textContent="Play";mark(-1)}
+};
+render();
+</script>
+</body>
+</html>
