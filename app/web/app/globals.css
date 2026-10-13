@@ -366,6 +366,14 @@ h1 {
   height: 100%;
 }
 
+.g.dense {
+  gap: 1px;
+}
+
+.g.dense .c {
+  border-radius: 2px;
+}
+
 .c {
   border-radius: 5px;
   background: rgba(160, 185, 235, 0.07);
@@ -395,6 +403,10 @@ h1 {
 .playing .head {
   opacity: 0.9;
   animation-play-state: running;
+}
+
+.head.manual {
+  animation: none;
 }
 
 .tx + .head {
@@ -548,6 +560,15 @@ select {
 
 .btn.p:hover {
   background: #fff;
+}
+
+.btn.p:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn.p:disabled:hover {
+  background: var(--fg);
 }
 
 /* ---------- params panel ---------- */

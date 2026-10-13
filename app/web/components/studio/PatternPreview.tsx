@@ -1,11 +1,13 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, Ref } from "react";
 import type { Preview } from "@/lib/preview";
 
 function Grid({ preview }: { preview: Extract<Preview, { kind: "grid" }> }) {
   const { rows, columns, cells } = preview;
+  const barEvery = preview.barEvery ?? 4;
+  const dense = columns > 32;
   return (
     <div
-      className="g"
+      className={`g${dense ? " dense" : ""}`}
       style={{
         gridTemplateColumns: `repeat(${columns}, 1fr)`,
         gridTemplateRows: `repeat(${rows}, 1fr)`,
@@ -13,7 +15,7 @@ function Grid({ preview }: { preview: Extract<Preview, { kind: "grid" }> }) {
     >
       {cells.map((on, index) => {
         const column = index % columns;
-        const brighter = column % 4 === 0;
+        const brighter = column % barEvery === 0;
         return (
           <i
             key={index}
@@ -68,7 +70,15 @@ function Texture({
   );
 }
 
-export function PatternPreview({ preview }: { preview: Preview }) {
+export function PatternPreview({
+  preview,
+  playheadRef,
+  manual = false,
+}: {
+  preview: Preview;
+  playheadRef?: Ref<HTMLDivElement>;
+  manual?: boolean;
+}) {
   return (
     <div className="card" id="vis">
       <div className="vh">
@@ -82,7 +92,8 @@ export function PatternPreview({ preview }: { preview: Preview }) {
         {preview.kind === "texture" && <Texture preview={preview} />}
         {preview.kind === "grid" && <Grid preview={preview} />}
         <div
-          className="head"
+          ref={playheadRef}
+          className={`head${manual ? " manual" : ""}`}
           style={{ "--d": `${preview.duration}s` } as CSSProperties}
         />
       </div>

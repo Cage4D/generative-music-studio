@@ -1,3 +1,11 @@
+import { generateArpeggio } from "../audio/generators/arpeggio";
+import {
+  ARPEGGIO_STEPS,
+  STEPS_PER_BAR,
+  type ArpeggioParams,
+  type ArpeggioPatternName,
+  type StepLength,
+} from "../audio/types";
 import { mulberry32 } from "./prng";
 import { GENERATOR_BY_ID } from "./generators";
 import type { GeneratorBlock, StudioState } from "./studio-state";
@@ -8,6 +16,7 @@ export type GridPreview = {
   columns: number;
   cells: boolean[];
   duration: number;
+  barEvery?: number;
 };
 
 export type PadPreview = {
@@ -106,10 +115,55 @@ function buildGrid(
   };
 }
 
+export function arpeggioParams(state: StudioState): ArpeggioParams {
+  const block = state.blocks.arpeggio;
+  return {
+    seed: state.seed,
+    tempo: state.tempo,
+    root: state.root,
+    scale: state.scale,
+    density: state.density,
+    swing: state.swing,
+    effects: state.effects,
+    arpeggio: {
+      pattern: str(block, "pattern") as ArpeggioPatternName,
+      octaves: num(block, "octaves"),
+      stepLength: str(block, "stepLength") as StepLength,
+    },
+  };
+}
+
+function buildArpeggioGrid(state: StudioState): GridPreview {
+  const { events, range } = generateArpeggio(arpeggioParams(state));
+  const rows = GENERATOR_BY_ID.arpeggio.rows;
+  const columns = ARPEGGIO_STEPS;
+  const cells = Array.from({ length: rows * columns }, () => false);
+
+  for (const event of events) {
+    if (!event) continue;
+    const normalized = (event.midi - range.min) / (range.max - range.min + 1);
+    const fromBottom = Math.min(rows - 1, Math.floor(normalized * rows));
+    const row = rows - 1 - fromBottom;
+    cells[row * columns + event.step] = true;
+  }
+
+  return {
+    kind: "grid",
+    rows,
+    columns,
+    cells,
+    duration: (columns * 15) / state.tempo,
+    barEvery: STEPS_PER_BAR,
+  };
+}
+
 export function buildPreview(state: StudioState): Preview {
   const rand = mulberry32(state.seed);
   const block = state.blocks[state.generatorId];
 
+  if (state.generatorId === "arpeggio") {
+    return buildArpeggioGrid(state);
+  }
   if (state.generatorId === "ambient-pad") {
     return buildPad(block, state.tempo, rand);
   }
