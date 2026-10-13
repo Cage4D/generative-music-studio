@@ -165,6 +165,7 @@ The one rule that keeps the project honest: **the seeded PRNG decides everything
 9. Texture `crackle` = short, quiet noise bursts at times chosen by the PRNG.
 10. "Same music" means same **notes and timing**, not bit-identical audio (noise grain and reverb differ slightly). Do not claim more in the UI or README.
 11. Pitched generators use `root` and `scale`. Drums and texture ignore them (they stay in the shared params).
+12. **The seed is the character.** Every generator must derive its character from the seed (which notes or voices it uses, its structure, its phrasing, its timbre), not only small details like rests and velocity. Changing the seed must make a clearly different piece of music. Each generator has a DIFFERENCE METRIC test.
 
 Build order for generators: arpeggio, melody, bassline, drum-pattern, ambient-pad, texture.
 
@@ -203,6 +204,7 @@ Errors are always `{ statusCode, error, message, issues? }` where `issues` is `[
 - Call Tone's random features, or claim bit-identical audio.
 - Build the Track page or Gallery in this task.
 - Invent schema changes silently. If a field cannot be implemented (for example the `acoustic` kit), stop and report it.
+- Run `next build` (or anything else that writes to `.next`) while `next dev` is running. It corrupts the dev server's cache.
 
 ## 11. Prompt to paste into opencode
 
