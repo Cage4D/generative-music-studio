@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { CreatePatternSchema, type GeneratorId } from "@gms/shared";
 import type { ArpeggioEngine, ArpeggioEngineClass } from "@/audio/engine";
+import { readDevFlags } from "@/audio/dev-flags";
 import { type ArpeggioParams } from "@/audio/types";
 import { GENERATORS, GENERATOR_BY_ID } from "@/lib/generators";
 import { columnOf, PAGE_STEPS, pageOf } from "@/lib/paging";
-import { arpeggioParams, buildPreview } from "@/lib/preview";
+import { arpeggioParams, buildPreviewFrom } from "@/lib/preview";
 import { buildRequest } from "@/lib/request";
 import {
   createDefaultState,
@@ -39,6 +40,11 @@ export function Studio() {
   const toneRef = useRef<typeof import("tone") | null>(null);
   const playheadRef = useRef<HTMLDivElement | null>(null);
   const mountedRef = useRef(true);
+  const stateRef = useRef(state);
+
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   const [page, setPage] = useState(0);
   const pageRef = useRef(0);
@@ -78,6 +84,11 @@ export function Studio() {
     [applyPlayhead],
   );
 
+  // `?draw=off` skips the playhead entirely so audio diagnostics run without
+  // React state updates in the scheduling path.
+  const drawOff = useMemo(() => readDevFlags().drawOff, []);
+  const stepHandler = drawOff ? null : movePlayhead;
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -98,6 +109,16 @@ export function Studio() {
         if (!active) return;
         toneRef.current = tone;
         engineCtorRef.current = engineModule.ArpeggioEngine;
+        engineModule.ensureToneContext();
+        if (!engineRef.current) {
+          const engine = new engineModule.ArpeggioEngine();
+          engine.onStep = stepHandler;
+          engineRef.current = engine;
+          engine.update(arpeggioParams(stateRef.current));
+          engine.prepare().catch((error) => {
+            console.error("Audio prepare failed", error);
+          });
+        }
       })
       .catch((error) => {
         console.error("Audio modules failed to load", error);
@@ -105,7 +126,7 @@ export function Studio() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [movePlayhead, stepHandler]);
 
   useEffect(() => {
     if (state.generatorId !== "arpeggio") return;
@@ -121,10 +142,10 @@ export function Studio() {
     const Ctor =
       engineCtorRef.current ?? (await import("@/audio/engine")).ArpeggioEngine;
     const engine = new Ctor();
-    engine.onStep = movePlayhead;
+    engine.onStep = stepHandler;
     engineRef.current = engine;
     return engine;
-  }, [movePlayhead]);
+  }, [stepHandler]);
 
   async function startArpeggio(params: ArpeggioParams) {
     const tone = toneRef.current ?? (await import("tone"));
@@ -180,7 +201,29 @@ export function Studio() {
     dispatch({ type: "selectGenerator", generatorId });
   }
 
-  const preview = useMemo(() => buildPreview(state), [state]);
+  // The preview only depends on these fields; keeping effect/title/save changes
+  // out of the memo avoids regenerating the grid on every unrelated keystroke.
+  const preview = useMemo(
+    () =>
+      buildPreviewFrom({
+        generatorId: state.generatorId,
+        seed: state.seed,
+        tempo: state.tempo,
+        density: state.density,
+        root: state.root,
+        scale: state.scale,
+        blocks: state.blocks,
+      }),
+    [
+      state.generatorId,
+      state.seed,
+      state.tempo,
+      state.density,
+      state.root,
+      state.scale,
+      state.blocks,
+    ],
+  );
   const request = useMemo(() => buildRequest(state), [state]);
   const validation = useMemo(
     () => CreatePatternSchema.safeParse(request),

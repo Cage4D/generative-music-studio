@@ -35,6 +35,14 @@ export type TexturePreview = {
 
 export type Preview = GridPreview | PadPreview | TexturePreview;
 
+// Everything the preview rendering depends on. Effects and swing are excluded
+// because generateArpeggio ignores them, so changing them must not force a
+// preview rebuild.
+export type PreviewInputs = Pick<
+  StudioState,
+  "generatorId" | "seed" | "tempo" | "density" | "root" | "scale" | "blocks"
+>;
+
 const num = (block: GeneratorBlock, key: string): number => Number(block[key]);
 const str = (block: GeneratorBlock, key: string): string => String(block[key]);
 
@@ -72,13 +80,13 @@ function buildTexture(
 }
 
 function buildGrid(
-  state: StudioState,
+  inputs: PreviewInputs,
   rand: () => number,
 ): GridPreview {
-  const block = state.blocks[state.generatorId];
-  const generator = GENERATOR_BY_ID[state.generatorId];
+  const block = inputs.blocks[inputs.generatorId];
+  const generator = GENERATOR_BY_ID[inputs.generatorId];
   const rows = generator.rows;
-  const isDrums = state.generatorId === "drum-pattern";
+  const isDrums = inputs.generatorId === "drum-pattern";
   const totalSteps = isDrums ? num(block, "steps") : 16;
   const cells: boolean[] = [];
 
@@ -87,7 +95,7 @@ function buildGrid(
     const fourOnFloor = str(block, "style") === "four-on-floor";
     for (let row = 0; row < rows; row++) {
       for (let column = 0; column < totalSteps; column++) {
-        let on = rand() < probabilities[row] * (0.5 + state.density);
+        let on = rand() < probabilities[row] * (0.5 + inputs.density);
         if (fourOnFloor && row === 0) on = column % 4 === 0;
         cells.push(on);
       }
@@ -95,7 +103,7 @@ function buildGrid(
   } else {
     const picks = Array.from({ length: totalSteps }, () => [
       Math.floor(rand() * rows),
-      rand() < state.density,
+      rand() < inputs.density,
     ] as const);
     for (let row = 0; row < rows; row++) {
       for (let column = 0; column < totalSteps; column++) {
@@ -110,7 +118,7 @@ function buildGrid(
     rows,
     totalSteps,
     cells,
-    duration: (totalSteps * 15) / state.tempo,
+    duration: (totalSteps * 15) / inputs.tempo,
   };
 }
 
@@ -132,8 +140,23 @@ export function arpeggioParams(state: StudioState): ArpeggioParams {
   };
 }
 
-function buildArpeggioGrid(state: StudioState): GridPreview {
-  const { events, range } = generateArpeggio(arpeggioParams(state));
+function buildArpeggioGrid(inputs: PreviewInputs): GridPreview {
+  const block = inputs.blocks.arpeggio;
+  const params: ArpeggioParams = {
+    seed: inputs.seed,
+    tempo: inputs.tempo,
+    root: inputs.root,
+    scale: inputs.scale,
+    density: inputs.density,
+    swing: 0,
+    effects: {},
+    arpeggio: {
+      pattern: str(block, "pattern") as ArpeggioPatternName,
+      octaves: num(block, "octaves"),
+      stepLength: str(block, "stepLength") as StepLength,
+    },
+  };
+  const { events, range } = generateArpeggio(params);
   const rows = GENERATOR_BY_ID.arpeggio.rows;
   const totalSteps = ARPEGGIO_STEPS;
   const cells = Array.from({ length: rows * totalSteps }, () => false);
@@ -151,22 +174,34 @@ function buildArpeggioGrid(state: StudioState): GridPreview {
     rows,
     totalSteps,
     cells,
-    duration: (totalSteps * 15) / state.tempo,
+    duration: (totalSteps * 15) / inputs.tempo,
   };
 }
 
-export function buildPreview(state: StudioState): Preview {
-  const rand = mulberry32(state.seed);
-  const block = state.blocks[state.generatorId];
+export function buildPreviewFrom(inputs: PreviewInputs): Preview {
+  const rand = mulberry32(inputs.seed);
+  const block = inputs.blocks[inputs.generatorId];
 
-  if (state.generatorId === "arpeggio") {
-    return buildArpeggioGrid(state);
+  if (inputs.generatorId === "arpeggio") {
+    return buildArpeggioGrid(inputs);
   }
-  if (state.generatorId === "ambient-pad") {
-    return buildPad(block, state.tempo, rand);
+  if (inputs.generatorId === "ambient-pad") {
+    return buildPad(block, inputs.tempo, rand);
   }
-  if (state.generatorId === "texture") {
+  if (inputs.generatorId === "texture") {
     return buildTexture(block, rand);
   }
-  return buildGrid(state, rand);
+  return buildGrid(inputs, rand);
+}
+
+export function buildPreview(state: StudioState): Preview {
+  return buildPreviewFrom({
+    generatorId: state.generatorId,
+    seed: state.seed,
+    tempo: state.tempo,
+    density: state.density,
+    root: state.root,
+    scale: state.scale,
+    blocks: state.blocks,
+  });
 }
