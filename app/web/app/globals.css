@@ -353,6 +353,31 @@ h1 {
   background: var(--acc);
 }
 
+.pages {
+  display: flex;
+  gap: 4px;
+}
+
+.pages button {
+  font: 500 10px var(--mono);
+  letter-spacing: 0.08em;
+  color: var(--mut);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 7px;
+  cursor: pointer;
+}
+
+.pages button.on {
+  color: var(--fg);
+  border-color: var(--fg);
+}
+
+.pages button:disabled {
+  cursor: default;
+}
+
 #vis .in {
   position: relative;
   flex: 1;
@@ -364,14 +389,6 @@ h1 {
   display: grid;
   gap: 4px;
   height: 100%;
-}
-
-.g.dense {
-  gap: 1px;
-}
-
-.g.dense .c {
-  border-radius: 2px;
 }
 
 .c {
@@ -386,6 +403,10 @@ h1 {
 
 .c.on {
   background: var(--acc);
+}
+
+.c.dim {
+  opacity: 0.3;
 }
 
 .head {

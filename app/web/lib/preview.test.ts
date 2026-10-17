@@ -1,19 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { generateArpeggio } from "../audio/generators/arpeggio";
-import { ARPEGGIO_STEPS, STEPS_PER_BAR } from "../audio/types";
+import { ARPEGGIO_STEPS } from "../audio/types";
 import { arpeggioParams, buildPreview } from "./preview";
 import { createDefaultState } from "./studio-state";
 
 describe("arpeggio preview", () => {
-  it("draws a 64 by 6 grid from the generated events", () => {
+  it("draws a 64-step by 6-row grid from the generated events", () => {
     const state = createDefaultState();
     const preview = buildPreview(state);
     expect(preview.kind).toBe("grid");
     if (preview.kind !== "grid") return;
 
     expect(preview.rows).toBe(6);
-    expect(preview.columns).toBe(ARPEGGIO_STEPS);
-    expect(preview.barEvery).toBe(STEPS_PER_BAR);
+    expect(preview.totalSteps).toBe(ARPEGGIO_STEPS);
     expect(preview.cells).toHaveLength(ARPEGGIO_STEPS * 6);
 
     const { events } = generateArpeggio(arpeggioParams(state));
@@ -32,13 +31,14 @@ describe("arpeggio preview", () => {
     if (preview.kind !== "grid") return;
 
     const rows = preview.rows;
+    const totalSteps = preview.totalSteps;
     const rowOf = (midi: number) => {
       const normalized = (midi - range.min) / (range.max - range.min + 1);
       return rows - 1 - Math.min(rows - 1, Math.floor(normalized * rows));
     };
 
     const highestRow = rowOf(highest.midi);
-    const topRow = preview.cells.slice(0, preview.columns);
+    const topRow = preview.cells.slice(0, totalSteps);
     expect(topRow[highest.step]).toBe(true);
     for (const note of notes) {
       expect(highestRow).toBeLessThanOrEqual(rowOf(note.midi));

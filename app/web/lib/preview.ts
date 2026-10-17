@@ -1,7 +1,6 @@
 import { generateArpeggio } from "../audio/generators/arpeggio";
 import {
   ARPEGGIO_STEPS,
-  STEPS_PER_BAR,
   type ArpeggioParams,
   type ArpeggioPatternName,
   type StepLength,
@@ -13,7 +12,7 @@ import type { GeneratorBlock, StudioState } from "./studio-state";
 export type GridPreview = {
   kind: "grid";
   rows: number;
-  columns: number;
+  totalSteps: number;
   cells: boolean[];
   duration: number;
   barEvery?: number;
@@ -80,26 +79,26 @@ function buildGrid(
   const generator = GENERATOR_BY_ID[state.generatorId];
   const rows = generator.rows;
   const isDrums = state.generatorId === "drum-pattern";
-  const columns = isDrums ? num(block, "steps") : 16;
+  const totalSteps = isDrums ? num(block, "steps") : 16;
   const cells: boolean[] = [];
 
   if (isDrums) {
     const probabilities = [0.3, 0.22, num(block, "hatDensity"), 0.18];
     const fourOnFloor = str(block, "style") === "four-on-floor";
     for (let row = 0; row < rows; row++) {
-      for (let column = 0; column < columns; column++) {
+      for (let column = 0; column < totalSteps; column++) {
         let on = rand() < probabilities[row] * (0.5 + state.density);
         if (fourOnFloor && row === 0) on = column % 4 === 0;
         cells.push(on);
       }
     }
   } else {
-    const picks = Array.from({ length: columns }, () => [
+    const picks = Array.from({ length: totalSteps }, () => [
       Math.floor(rand() * rows),
       rand() < state.density,
     ] as const);
     for (let row = 0; row < rows; row++) {
-      for (let column = 0; column < columns; column++) {
+      for (let column = 0; column < totalSteps; column++) {
         const [pickRow, active] = picks[column];
         cells.push(active && pickRow === row);
       }
@@ -109,9 +108,9 @@ function buildGrid(
   return {
     kind: "grid",
     rows,
-    columns,
+    totalSteps,
     cells,
-    duration: (columns * 15) / state.tempo,
+    duration: (totalSteps * 15) / state.tempo,
   };
 }
 
@@ -136,24 +135,23 @@ export function arpeggioParams(state: StudioState): ArpeggioParams {
 function buildArpeggioGrid(state: StudioState): GridPreview {
   const { events, range } = generateArpeggio(arpeggioParams(state));
   const rows = GENERATOR_BY_ID.arpeggio.rows;
-  const columns = ARPEGGIO_STEPS;
-  const cells = Array.from({ length: rows * columns }, () => false);
+  const totalSteps = ARPEGGIO_STEPS;
+  const cells = Array.from({ length: rows * totalSteps }, () => false);
 
   for (const event of events) {
     if (!event) continue;
     const normalized = (event.midi - range.min) / (range.max - range.min + 1);
     const fromBottom = Math.min(rows - 1, Math.floor(normalized * rows));
     const row = rows - 1 - fromBottom;
-    cells[row * columns + event.step] = true;
+    cells[row * totalSteps + event.step] = true;
   }
 
   return {
     kind: "grid",
     rows,
-    columns,
+    totalSteps,
     cells,
-    duration: (columns * 15) / state.tempo,
-    barEvery: STEPS_PER_BAR,
+    duration: (totalSteps * 15) / state.tempo,
   };
 }
 

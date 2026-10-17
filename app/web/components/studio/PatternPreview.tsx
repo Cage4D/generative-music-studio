@@ -1,27 +1,46 @@
 import type { CSSProperties, Ref } from "react";
+import { PAGE_STEPS, pageCount } from "@/lib/paging";
 import type { Preview } from "@/lib/preview";
 
-function Grid({ preview }: { preview: Extract<Preview, { kind: "grid" }> }) {
-  const { rows, columns, cells } = preview;
+function Grid({
+  preview,
+  page,
+}: {
+  preview: Extract<Preview, { kind: "grid" }>;
+  page: number;
+}) {
+  const { rows, totalSteps, cells } = preview;
   const barEvery = preview.barEvery ?? 4;
-  const dense = columns > 32;
+  const pages = pageCount(totalSteps);
+  const activePage = Math.max(0, Math.min(page, pages - 1));
+  const start = activePage * PAGE_STEPS;
+
+  const visible: boolean[] = [];
+  const dim: boolean[] = [];
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < PAGE_STEPS; column++) {
+      const step = start + column;
+      const beyond = step >= totalSteps;
+      visible.push(!beyond && cells[row * totalSteps + step]);
+      dim.push(beyond);
+    }
+  }
+
   return (
     <div
-      className={`g${dense ? " dense" : ""}`}
+      className="g"
       style={{
-        gridTemplateColumns: `repeat(${columns}, 1fr)`,
+        gridTemplateColumns: `repeat(${PAGE_STEPS}, 1fr)`,
         gridTemplateRows: `repeat(${rows}, 1fr)`,
       }}
     >
-      {cells.map((on, index) => {
-        const column = index % columns;
+      {visible.map((on, index) => {
+        const column = index % PAGE_STEPS;
         const brighter = column % barEvery === 0;
-        return (
-          <i
-            key={index}
-            className={`c${on ? " on" : ""}${brighter ? " b" : ""}`}
-          />
-        );
+        const classes = `c${on ? " on" : ""}${brighter ? " b" : ""}${
+          dim[index] ? " dim" : ""
+        }`;
+        return <i key={index} className={classes} />;
       })}
     </div>
   );
@@ -74,15 +93,39 @@ export function PatternPreview({
   preview,
   playheadRef,
   manual = false,
+  page = 0,
+  onSelectPage,
+  playing = false,
 }: {
   preview: Preview;
   playheadRef?: Ref<HTMLDivElement>;
   manual?: boolean;
+  page?: number;
+  onSelectPage?: (page: number) => void;
+  playing?: boolean;
 }) {
+  const pages = preview.kind === "grid" ? pageCount(preview.totalSteps) : 1;
+  const activePage = Math.max(0, Math.min(page, pages - 1));
+
   return (
     <div className="card" id="vis">
       <div className="vh">
         <span>Pattern preview</span>
+        {pages > 1 && (
+          <div className="pages">
+            {Array.from({ length: pages }, (_, index) => (
+              <button
+                key={index}
+                type="button"
+                className={index === activePage ? "on" : undefined}
+                disabled={playing}
+                onClick={() => onSelectPage?.(index)}
+              >
+                {index + 1}
+              </button>
+            ))}
+          </div>
+        )}
         <span className="lv">
           <i />
         </span>
@@ -90,7 +133,9 @@ export function PatternPreview({
       <div className="in">
         {preview.kind === "pad" && <Pad preview={preview} />}
         {preview.kind === "texture" && <Texture preview={preview} />}
-        {preview.kind === "grid" && <Grid preview={preview} />}
+        {preview.kind === "grid" && (
+          <Grid preview={preview} page={activePage} />
+        )}
         <div
           ref={playheadRef}
           className={`head${manual ? " manual" : ""}`}

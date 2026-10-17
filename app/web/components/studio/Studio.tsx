@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { CreatePatternSchema, type GeneratorId } from "@gms/shared";
 import type { ArpeggioEngine, ArpeggioEngineClass } from "@/audio/engine";
-import { ARPEGGIO_STEPS, type ArpeggioParams } from "@/audio/types";
+import { type ArpeggioParams } from "@/audio/types";
 import { GENERATORS, GENERATOR_BY_ID } from "@/lib/generators";
+import { columnOf, PAGE_STEPS, pageOf } from "@/lib/paging";
 import { arpeggioParams, buildPreview } from "@/lib/preview";
 import { buildRequest } from "@/lib/request";
 import {
@@ -39,17 +40,43 @@ export function Studio() {
   const playheadRef = useRef<HTMLDivElement | null>(null);
   const mountedRef = useRef(true);
 
-  const movePlayhead = useCallback((step: number) => {
+  const [page, setPage] = useState(0);
+  const pageRef = useRef(0);
+  const stepRef = useRef(-1);
+  const totalStepsRef = useRef(0);
+
+  const applyPlayhead = useCallback(() => {
     const element = playheadRef.current;
     if (!element) return;
+    const step = stepRef.current;
+    const currentPage = pageRef.current;
     if (step < 0) {
+      element.style.visibility = currentPage === 0 ? "visible" : "hidden";
       element.style.transform = "translateX(0)";
       return;
     }
+    if (pageOf(step, totalStepsRef.current) !== currentPage) {
+      element.style.visibility = "hidden";
+      return;
+    }
     const width = element.parentElement?.clientWidth ?? 0;
-    const position = ((step + 0.5) / ARPEGGIO_STEPS) * width;
+    const position = ((columnOf(step) + 0.5) / PAGE_STEPS) * width;
+    element.style.visibility = "visible";
     element.style.transform = `translateX(${position}px)`;
   }, []);
+
+  const movePlayhead = useCallback(
+    (step: number) => {
+      stepRef.current = step;
+      const next = step < 0 ? 0 : pageOf(step, totalStepsRef.current);
+      if (next !== pageRef.current) {
+        pageRef.current = next;
+        setPage(next);
+      }
+      applyPlayhead();
+    },
+    [applyPlayhead],
+  );
 
   useEffect(() => {
     mountedRef.current = true;
@@ -160,6 +187,18 @@ export function Studio() {
     [request],
   );
 
+  const totalSteps = preview.kind === "grid" ? preview.totalSteps : 0;
+  useEffect(() => {
+    totalStepsRef.current = totalSteps;
+  }, [totalSteps]);
+
+  function handleSelectPage(next: number) {
+    if (state.playing) return;
+    pageRef.current = next;
+    setPage(next);
+    applyPlayhead();
+  }
+
   const activeIndex = GENERATORS.findIndex(
     (generator) => generator.id === state.generatorId,
   );
@@ -223,6 +262,9 @@ export function Studio() {
             preview={preview}
             playheadRef={playheadRef}
             manual={state.generatorId === "arpeggio"}
+            page={page}
+            onSelectPage={handleSelectPage}
+            playing={state.playing}
           />
           <Transport
             seed={state.seed}
