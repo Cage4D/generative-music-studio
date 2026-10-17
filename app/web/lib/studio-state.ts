@@ -36,7 +36,10 @@ export type SharedParams = {
 
 export type SaveStatus =
   | { kind: "idle" }
-  | { kind: "note"; message: string };
+  | { kind: "saving" }
+  | { kind: "waking" }
+  | { kind: "saved"; slug: string }
+  | { kind: "error"; message: string; retryable: boolean };
 
 export type StudioState = {
   generatorId: GeneratorId;
@@ -107,7 +110,8 @@ export type StudioAction =
   | { type: "setTitle"; value: string }
   | { type: "setParentSlug"; value: string | null }
   | { type: "togglePlay" }
-  | { type: "setSaveStatus"; value: SaveStatus };
+  | { type: "setSaveStatus"; value: SaveStatus }
+  | { type: "hydrate"; state: StudioState };
 
 export function studioReducer(
   state: StudioState,
@@ -115,13 +119,21 @@ export function studioReducer(
 ): StudioState {
   switch (action.type) {
     case "selectGenerator":
-      return { ...state, generatorId: action.generatorId };
+      return {
+        ...state,
+        generatorId: action.generatorId,
+        saveStatus: { kind: "idle" },
+      };
 
     case "setShared":
-      return { ...state, ...action.patch };
+      return { ...state, ...action.patch, saveStatus: { kind: "idle" } };
 
     case "setSeed":
-      return { ...state, seed: clampSeed(action.value) };
+      return {
+        ...state,
+        seed: clampSeed(action.value),
+        saveStatus: { kind: "idle" },
+      };
 
     case "setBlockField":
       return {
@@ -133,17 +145,18 @@ export function studioReducer(
             [action.key]: action.value,
           },
         },
+        saveStatus: { kind: "idle" },
       };
 
     case "setEffect": {
       const effects = { ...state.effects };
       if (action.value) effects[action.key] = action.value;
       else delete effects[action.key];
-      return { ...state, effects };
+      return { ...state, effects, saveStatus: { kind: "idle" } };
     }
 
     case "setTitle":
-      return { ...state, title: action.value };
+      return { ...state, title: action.value, saveStatus: { kind: "idle" } };
 
     case "setParentSlug":
       return { ...state, parentSlug: action.value };
@@ -153,5 +166,8 @@ export function studioReducer(
 
     case "setSaveStatus":
       return { ...state, saveStatus: action.value };
+
+    case "hydrate":
+      return action.state;
   }
 }

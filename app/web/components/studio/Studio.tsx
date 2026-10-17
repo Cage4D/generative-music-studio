@@ -1,11 +1,34 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { CreatePatternSchema, type GeneratorId } from "@gms/shared";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { CreatePatternSchema, type GeneratorId, type PatternResponse } from "@gms/shared";
 import type { ArpeggioEngine, ArpeggioEngineClass } from "@/audio/engine";
 import { readDevFlags } from "@/audio/dev-flags";
 import { type ArpeggioParams, type MelodyParams } from "@/audio/types";
-import { GENERATORS, GENERATOR_BY_ID } from "@/lib/generators";
+import {
+  ApiError,
+  createPattern,
+  describeApiError,
+  getPattern,
+  isRetryable,
+  shareUrl,
+} from "@/lib/api";
+import {
+  GENERATORS,
+  GENERATOR_BY_ID,
+  isGeneratorSupported,
+} from "@/lib/generators";
+import { hydrateState } from "@/lib/pattern-io";
 import { columnOf, PAGE_STEPS, pageOf } from "@/lib/paging";
 import { buildPreviewFrom, engineParamsFor } from "@/lib/preview";
 import { buildRequest } from "@/lib/request";
@@ -16,6 +39,7 @@ import {
   type NoteName,
   type ScaleName,
   type SharedParams,
+  type StudioState,
 } from "@/lib/studio-state";
 import { Background } from "./Background";
 import { Header } from "./Header";
@@ -27,13 +51,29 @@ import { ParamsPanel } from "./ParamsPanel";
 import { SaveCard } from "./SaveCard";
 import { Footer } from "./Footer";
 
+const WAKE_DELAY_MS = 1500;
+
+type StudioProps = {
+  initialPattern?: PatternResponse;
+};
+
 function formatIssue(issue: { path: PropertyKey[]; message: string }): string {
   const path = issue.path.map(String).join(".");
   return path ? `${path}: ${issue.message}` : issue.message;
 }
 
-export function Studio() {
-  const [state, dispatch] = useReducer(studioReducer, undefined, createDefaultState);
+function initState(response: PatternResponse | undefined): StudioState {
+  if (!response) return createDefaultState();
+  return hydrateState(
+    createDefaultState(),
+    response.pattern,
+    response.parentSlug,
+    response.title ?? "",
+  );
+}
+
+export function Studio({ initialPattern }: StudioProps = {}) {
+  const [state, dispatch] = useReducer(studioReducer, initialPattern, initState);
 
   const engineRef = useRef<ArpeggioEngine | null>(null);
   const engineCtorRef = useRef<ArpeggioEngineClass | null>(null);
@@ -41,15 +81,56 @@ export function Studio() {
   const playheadRef = useRef<HTMLDivElement | null>(null);
   const mountedRef = useRef(true);
   const stateRef = useRef(state);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
 
   const [page, setPage] = useState(0);
+  const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
   const pageRef = useRef(0);
   const stepRef = useRef(-1);
   const totalStepsRef = useRef(0);
+
+  const searchParams = useSearchParams();
+  const remixParam = initialPattern ? null : searchParams.get("remix");
+
+  useEffect(() => {
+    if (!remixParam) return;
+    let active = true;
+    getPattern(remixParam)
+      .then((response) => {
+        if (!active) return;
+        dispatch({
+          type: "hydrate",
+          state: hydrateState(
+            createDefaultState(),
+            response.pattern,
+            response.slug,
+            "",
+          ),
+        });
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        const apiError =
+          error instanceof ApiError
+            ? error
+            : new ApiError("network", "Couldn't load that remix.");
+        dispatch({
+          type: "setSaveStatus",
+          value: {
+            kind: "error",
+            message: `Couldn't load remix: ${describeApiError(apiError)}`,
+            retryable: false,
+          },
+        });
+      });
+    return () => {
+      active = false;
+    };
+  }, [remixParam]);
 
   const applyPlayhead = useCallback(() => {
     const element = playheadRef.current;
@@ -93,6 +174,7 @@ export function Studio() {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
       try {
         engineRef.current?.dispose();
       } catch (error) {
@@ -207,8 +289,72 @@ export function Studio() {
     dispatch({ type: "selectGenerator", generatorId });
   }
 
-  // The preview only depends on these fields; keeping effect/title/save changes
-  // out of the memo avoids regenerating the grid on every unrelated keystroke.
+  const supported = isGeneratorSupported(state.generatorId);
+
+  const request = useMemo(() => buildRequest(state), [state]);
+  const validation = useMemo(
+    () => CreatePatternSchema.safeParse(request),
+    [request],
+  );
+  const validationMessage = validation.success
+    ? null
+    : formatIssue(validation.error.issues[0]);
+
+  const handleSave = useCallback(async () => {
+    if (!validation.success || !supported) return;
+    if (
+      state.saveStatus.kind === "saving" ||
+      state.saveStatus.kind === "waking"
+    ) {
+      return;
+    }
+
+    dispatch({ type: "setSaveStatus", value: { kind: "saving" } });
+    const wakeTimer = setTimeout(() => {
+      if (mountedRef.current) {
+        dispatch({ type: "setSaveStatus", value: { kind: "waking" } });
+      }
+    }, WAKE_DELAY_MS);
+
+    try {
+      const response = await createPattern(validation.data);
+      if (!mountedRef.current) return;
+      dispatch({
+        type: "setSaveStatus",
+        value: { kind: "saved", slug: response.slug },
+      });
+    } catch (error) {
+      if (!mountedRef.current) return;
+      const apiError =
+        error instanceof ApiError
+          ? error
+          : new ApiError("network", "Couldn't save this pattern.");
+      dispatch({
+        type: "setSaveStatus",
+        value: {
+          kind: "error",
+          message: describeApiError(apiError),
+          retryable: isRetryable(apiError),
+        },
+      });
+    } finally {
+      clearTimeout(wakeTimer);
+    }
+  }, [validation, supported, state.saveStatus.kind]);
+
+  async function handleCopyLink(slug: string) {
+    try {
+      await navigator.clipboard.writeText(
+        shareUrl(slug, window.location.origin),
+      );
+      setCopiedSlug(slug);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopiedSlug(null), 1500);
+    } catch {
+      // clipboard access can be denied; nothing to do
+    }
+  }
+
   const preview = useMemo(
     () =>
       buildPreviewFrom({
@@ -230,35 +376,64 @@ export function Studio() {
       state.blocks,
     ],
   );
-  const request = useMemo(() => buildRequest(state), [state]);
-  const validation = useMemo(
-    () => CreatePatternSchema.safeParse(request),
-    [request],
-  );
 
   const totalSteps = preview.kind === "grid" ? preview.totalSteps : 0;
   useEffect(() => {
     totalStepsRef.current = totalSteps;
   }, [totalSteps]);
 
-  function handleSelectPage(next: number) {
-    if (state.playing) return;
-    pageRef.current = next;
-    setPage(next);
-    applyPlayhead();
-  }
+  const origin = typeof window === "undefined" ? "" : window.location.origin;
 
   const activeIndex = GENERATORS.findIndex(
     (generator) => generator.id === state.generatorId,
   );
   const activeGenerator = GENERATOR_BY_ID[state.generatorId];
 
-  const firstIssue = validation.success
-    ? null
-    : formatIssue(validation.error.issues[0]);
-  const status =
-    firstIssue ??
-    (state.saveStatus.kind === "note" ? state.saveStatus.message : null);
+  function renderSaveStatus(): ReactNode {
+    const status = state.saveStatus;
+    if (status.kind === "saving" || status.kind === "waking") {
+      return (
+        <span>
+          <span className="dot" aria-hidden="true" />
+          {status.kind === "waking" ? "Waking the server…" : "Saving…"}
+        </span>
+      );
+    }
+    if (status.kind === "saved") {
+      const url = shareUrl(status.slug, origin);
+      return (
+        <span>
+          Saved. <a href={url}>{url}</a>{" "}
+          <button
+            type="button"
+            className="btn"
+            onClick={() => handleCopyLink(status.slug)}
+          >
+            {copiedSlug === status.slug ? "Copied" : "Copy link"}
+          </button>
+        </span>
+      );
+    }
+    if (status.kind === "error") {
+      return (
+        <span>
+          {status.message}
+          {status.retryable && (
+            <>
+              {" "}
+              <button type="button" className="btn" onClick={handleSave}>
+                Retry
+              </button>
+            </>
+          )}
+        </span>
+      );
+    }
+    if (!supported) {
+      return "Coming soon — saving is disabled for this voice.";
+    }
+    return validationMessage;
+  }
 
   function changeShared(key: keyof SharedParams, value: number | string) {
     if (key === "root") {
@@ -284,6 +459,16 @@ export function Studio() {
     } catch {
       // clipboard access can be denied; nothing to do
     }
+  }
+
+  const saving =
+    state.saveStatus.kind === "saving" || state.saveStatus.kind === "waking";
+
+  function handleSelectPage(next: number) {
+    if (state.playing) return;
+    pageRef.current = next;
+    setPage(next);
+    applyPlayhead();
   }
 
   return (
@@ -327,6 +512,13 @@ export function Studio() {
           />
         </section>
         <aside>
+          {initialPattern && (
+            <div className="card save">
+              <Link className="btn p" href={`/?remix=${initialPattern.slug}`}>
+                Remix this pattern
+              </Link>
+            </div>
+          )}
           <ParamsPanel
             state={state}
             onSharedChange={changeShared}
@@ -340,20 +532,11 @@ export function Studio() {
           <SaveCard
             title={state.title}
             parentSlug={state.parentSlug}
-            status={status}
-            disabled={!validation.success}
+            status={renderSaveStatus()}
+            disabled={!validation.success || !supported || saving}
             request={request}
             onTitleChange={(value) => dispatch({ type: "setTitle", value })}
-            onSave={() =>
-              dispatch({
-                type: "setSaveStatus",
-                value: {
-                  kind: "note",
-                  message:
-                    "Saving isn't connected yet — the patterns API arrives in a later milestone.",
-                },
-              })
-            }
+            onSave={handleSave}
           />
         </aside>
       </main>

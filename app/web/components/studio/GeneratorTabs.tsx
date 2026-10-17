@@ -1,4 +1,4 @@
-import { GENERATORS } from "@/lib/generators";
+import { GENERATORS, isGeneratorSupported } from "@/lib/generators";
 import type { GeneratorId } from "@gms/shared";
 
 type Props = {
@@ -19,6 +19,9 @@ export function GeneratorTabs({ activeId, onSelect }: Props) {
           onClick={() => onSelect(generator.id)}
         >
           {generator.name}
+          {!isGeneratorSupported(generator.id) && (
+            <span className="soon">Soon</span>
+          )}
         </button>
       ))}
     </div>

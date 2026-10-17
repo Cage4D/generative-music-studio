@@ -27,7 +27,9 @@ export function Header() {
         <Link className="on" href="/">
           Studio
         </Link>
-        <Link href="/gallery">Gallery</Link>
+        <span className="off" title="Coming soon">
+          Gallery
+        </span>
         <span className="tag">Preview</span>
       </nav>
     </header>

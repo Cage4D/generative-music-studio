@@ -257,6 +257,25 @@ main {
   color: var(--fg);
 }
 
+.tab .soon {
+  margin-left: 7px;
+  font: 400 9px var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mut);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+  vertical-align: middle;
+}
+
+nav .off {
+  color: var(--mut);
+  opacity: 0.45;
+  padding: 7px 12px;
+  cursor: not-allowed;
+}
+
 /* ---------- hero ---------- */
 .eye {
   display: flex;
@@ -791,6 +810,38 @@ pre {
 .save details {
   border-top: 0;
   padding: 12px 0 0;
+}
+
+/* ---------- track page ---------- */
+.track {
+  display: flex;
+  justify-content: center;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 56px 24px 64px;
+}
+
+.track .card {
+  padding: 28px;
+  width: 100%;
+  max-width: 620px;
+}
+
+.track-title {
+  font: 500 20px var(--font-manrope), Manrope, system-ui, sans-serif;
+  color: var(--fg);
+  margin: 0 0 8px;
+}
+
+.track-copy {
+  color: var(--mut);
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0 0 18px;
+}
+
+.track-copy b {
+  color: var(--fg);
 }
 
 /* ---------- footer ---------- */

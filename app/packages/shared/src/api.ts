@@ -13,5 +13,29 @@ export const GalleryQuerySchema = z.strictObject({
   sort: z.enum(["recent", "popular"]).default("recent"),
 });
 
+// Shape returned by `POST /patterns` and `GET /patterns/:slug`. Kept here so
+// the web client can validate responses with the same Zod source of truth.
+export const PatternResponseSchema = z.strictObject({
+  slug: z.string().min(1),
+  title: z.string().nullable(),
+  pattern: PatternSchema,
+  playCount: z.number().int().nonnegative(),
+  remixCount: z.number().int().nonnegative(),
+  parentSlug: z.string().nullable(),
+  createdAt: z.string(),
+});
+
+// Nest error envelope: `{ statusCode, error, message, issues? }`.
+export const ApiErrorResponseSchema = z.object({
+  statusCode: z.number().optional(),
+  error: z.string().optional(),
+  message: z.union([z.string(), z.array(z.string())]).optional(),
+  issues: z
+    .array(z.object({ path: z.string(), message: z.string() }))
+    .optional(),
+});
+
 export type CreatePatternInput = z.infer<typeof CreatePatternSchema>;
 export type GalleryQuery = z.infer<typeof GalleryQuerySchema>;
+export type PatternResponse = z.infer<typeof PatternResponseSchema>;
+export type ApiErrorResponse = z.infer<typeof ApiErrorResponseSchema>;

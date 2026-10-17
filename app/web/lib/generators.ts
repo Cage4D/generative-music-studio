@@ -166,3 +166,16 @@ export const GENERATORS: readonly GeneratorMeta[] = [
 export const GENERATOR_BY_ID = Object.fromEntries(
   GENERATORS.map((generator) => [generator.id, generator]),
 ) as Record<GeneratorId, GeneratorMeta>;
+
+// Generators with a real audio engine and preview. The rest are visible but
+// marked "coming soon" and cannot be saved.
+export const SUPPORTED_GENERATOR_IDS = [
+  "arpeggio",
+  "melody",
+] as const satisfies readonly GeneratorId[];
+
+export function isGeneratorSupported(generatorId: GeneratorId): boolean {
+  return (SUPPORTED_GENERATOR_IDS as readonly GeneratorId[]).includes(
+    generatorId,
+  );
+}
