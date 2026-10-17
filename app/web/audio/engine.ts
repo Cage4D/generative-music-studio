@@ -1,10 +1,18 @@
 import * as Tone from "tone";
 import { effectAmount, FILTER_MAX_HZ, filterCutoff } from "./effects";
 import { generateArpeggio } from "./generators/arpeggio";
+import { generateMelody } from "./generators/melody";
 import { stepSeconds } from "./theory";
 import { readDevFlags, type DevFlags } from "./dev-flags";
+import { hashEvents } from "./hash";
 import type { EffectId } from "../lib/studio-state";
-import type { ArpeggioParams, NoteEvent, Voice, VoiceKind } from "./types";
+import type {
+  ArpeggioParams,
+  MelodyParams,
+  NoteEvent,
+  Voice,
+  VoiceKind,
+} from "./types";
 
 export type StepListener = (step: number) => void;
 
@@ -27,6 +35,12 @@ type PersistentInstrument = {
   nodes: Tone.ToneAudioNode[];
   configure: (voice: Voice) => void;
 };
+
+export type EngineParams = ArpeggioParams | MelodyParams;
+
+function isMelodyParams(params: EngineParams): params is MelodyParams {
+  return "melody" in params;
+}
 
 type StepItem = {
   index: number;
@@ -130,9 +144,29 @@ function contextInfo(): string {
   }
 }
 
-function eventSignature(params: ArpeggioParams): string {
+// Settings that change the note stream (or the sequence subdivision) trigger a
+// rebuild. Playback-only settings (tempo, swing, effects) intentionally do not.
+function eventSignature(params: EngineParams): string {
+  if (isMelodyParams(params)) {
+    const block = params.melody;
+    return [
+      "melody",
+      params.seed,
+      params.root,
+      params.scale,
+      params.density,
+      block.contour,
+      block.octaveRange,
+      block.noteLength,
+      block.restProbability,
+      block.leapiness,
+      block.phraseLengthBars,
+      block.waveform,
+    ].join("|");
+  }
   const block = params.arpeggio;
   return [
+    "arpeggio",
     params.seed,
     params.root,
     params.scale,
@@ -141,20 +175,6 @@ function eventSignature(params: ArpeggioParams): string {
     block.octaves,
     block.stepLength,
   ].join("|");
-}
-
-function hashEvents(events: (NoteEvent | null)[]): string {
-  let hash = 0x811c9dc5;
-  for (const event of events) {
-    const token = event
-      ? `${event.step}:${event.midi}:${event.velocity.toFixed(4)}:${event.gate.toFixed(4)}`
-      : "-";
-    for (let i = 0; i < token.length; i++) {
-      hash ^= token.charCodeAt(i);
-      hash = Math.imul(hash, 0x01000193);
-    }
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
 export class ArpeggioEngine {
@@ -177,7 +197,9 @@ export class ArpeggioEngine {
   private activeKind: VoiceKind | null = null;
 
   private sequence: Tone.Sequence<StepItem> | null = null;
-  private params: ArpeggioParams | null = null;
+  private params: EngineParams | null = null;
+  private generatorId: "arpeggio" | "melody" = "arpeggio";
+  private activeStepLength = "16n";
   private signature = "";
   private voiceSignature = "";
   private pendingSignature: string | null = null;
@@ -253,7 +275,7 @@ export class ArpeggioEngine {
     }
   }
 
-  async start(params: ArpeggioParams): Promise<void> {
+  async start(params: EngineParams): Promise<void> {
     if (this.disposed) return;
     this.params = params;
     await Tone.getContext().resume();
@@ -271,7 +293,7 @@ export class ArpeggioEngine {
     transport.start();
   }
 
-  update(params: ArpeggioParams): void {
+  update(params: EngineParams): void {
     if (this.disposed) return;
     this.params = params;
     this.applyLive();
@@ -634,7 +656,13 @@ export class ArpeggioEngine {
     const params = this.params;
     if (!params) return;
     const start = now();
-    const { events, voice, archetype } = generateArpeggio(params);
+    const melody = isMelodyParams(params);
+    const result = melody ? generateMelody(params) : generateArpeggio(params);
+    const { events, voice, archetype } = result;
+    this.generatorId = melody ? "melody" : "arpeggio";
+    this.activeStepLength = melody
+      ? params.melody.noteLength
+      : params.arpeggio.stepLength;
     const finalVoice = this.flags.forcedVoice
       ? FORCED_VOICES[this.flags.forcedVoice]
       : voice;
@@ -645,7 +673,7 @@ export class ArpeggioEngine {
     const sequence = new Tone.Sequence<StepItem>(
       (time, item) => this.onSequenceStep(time, item),
       items,
-      params.arpeggio.stepLength,
+      this.activeStepLength,
     );
     sequence.loop = true;
     const transport = Tone.getTransport();
@@ -655,7 +683,7 @@ export class ArpeggioEngine {
     if (isDev) {
       const sounding = events.filter((event) => event !== null).length;
       console.debug(
-        `[arpeggio] buildSequence seed=${params.seed} archetype=${archetype} kind=${finalVoice.kind} sounding=${sounding} hash=${hashEvents(events)} generate=${(generated - start).toFixed(2)}ms total=${(done - start).toFixed(2)}ms ${contextInfo()}`,
+        `[${this.generatorId}] buildSequence seed=${params.seed} archetype=${archetype} kind=${finalVoice.kind} sounding=${sounding} hash=${hashEvents(events)} generate=${(generated - start).toFixed(2)}ms total=${(done - start).toFixed(2)}ms ${contextInfo()}`,
       );
     }
   }
@@ -689,10 +717,7 @@ export class ArpeggioEngine {
     }
     const instrument = this.activeKind ? this.instruments[this.activeKind] : null;
     if (item.note && this.params && instrument) {
-      const seconds = stepSeconds(
-        this.params.arpeggio.stepLength,
-        this.params.tempo,
-      );
+      const seconds = stepSeconds(this.activeStepLength, this.params.tempo);
       const offset =
         item.index % 2 === 1 ? (this.params.swing * seconds) / 3 : 0;
       // Keep starts strictly increasing: if this step is late, Tone would clamp
@@ -712,10 +737,12 @@ export class ArpeggioEngine {
     }
     if (isDev) {
       const elapsed = now() - start;
-      console.debug(`[arpeggio] step ${item.index} callback=${elapsed.toFixed(2)}ms`);
+      console.debug(
+        `[${this.generatorId}] step ${item.index} callback=${elapsed.toFixed(2)}ms`,
+      );
       if (elapsed > STEP_WARN_MS) {
         console.warn(
-          `[arpeggio] step ${item.index} callback ${elapsed.toFixed(2)}ms exceeds ${STEP_WARN_MS}ms`,
+          `[${this.generatorId}] step ${item.index} callback ${elapsed.toFixed(2)}ms exceeds ${STEP_WARN_MS}ms`,
         );
       }
     }

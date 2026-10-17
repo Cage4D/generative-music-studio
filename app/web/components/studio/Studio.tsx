@@ -4,10 +4,10 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import { CreatePatternSchema, type GeneratorId } from "@gms/shared";
 import type { ArpeggioEngine, ArpeggioEngineClass } from "@/audio/engine";
 import { readDevFlags } from "@/audio/dev-flags";
-import { type ArpeggioParams } from "@/audio/types";
+import { type ArpeggioParams, type MelodyParams } from "@/audio/types";
 import { GENERATORS, GENERATOR_BY_ID } from "@/lib/generators";
 import { columnOf, PAGE_STEPS, pageOf } from "@/lib/paging";
-import { arpeggioParams, buildPreviewFrom } from "@/lib/preview";
+import { buildPreviewFrom, engineParamsFor } from "@/lib/preview";
 import { buildRequest } from "@/lib/request";
 import {
   createDefaultState,
@@ -114,7 +114,8 @@ export function Studio() {
           const engine = new engineModule.ArpeggioEngine();
           engine.onStep = stepHandler;
           engineRef.current = engine;
-          engine.update(arpeggioParams(stateRef.current));
+          const initial = engineParamsFor(stateRef.current);
+          if (initial) engine.update(initial);
           engine.prepare().catch((error) => {
             console.error("Audio prepare failed", error);
           });
@@ -129,9 +130,10 @@ export function Studio() {
   }, [movePlayhead, stepHandler]);
 
   useEffect(() => {
-    if (state.generatorId !== "arpeggio") return;
+    const params = engineParamsFor(state);
+    if (!params) return;
     try {
-      engineRef.current?.update(arpeggioParams(state));
+      engineRef.current?.update(params);
     } catch (error) {
       console.error("Engine update failed", error);
     }
@@ -147,7 +149,7 @@ export function Studio() {
     return engine;
   }, [stepHandler]);
 
-  async function startArpeggio(params: ArpeggioParams) {
+  async function startPlayback(params: ArpeggioParams | MelodyParams) {
     const tone = toneRef.current ?? (await import("tone"));
     toneRef.current = tone;
     await tone.start();
@@ -166,12 +168,13 @@ export function Studio() {
       dispatch({ type: "togglePlay" });
       return;
     }
-    if (state.generatorId !== "arpeggio") {
+    const params = engineParamsFor(state);
+    if (!params) {
       dispatch({ type: "togglePlay" });
       return;
     }
     try {
-      await startArpeggio(arpeggioParams(state));
+      await startPlayback(params);
       if (!mountedRef.current) return;
       dispatch({ type: "togglePlay" });
     } catch (error) {
@@ -181,16 +184,19 @@ export function Studio() {
 
   async function handleSelectGenerator(generatorId: GeneratorId) {
     if (generatorId === state.generatorId) return;
-    if (generatorId === "arpeggio" && state.playing) {
+    const nextParams = engineParamsFor({ ...state, generatorId });
+    if (nextParams) {
       dispatch({ type: "selectGenerator", generatorId });
-      try {
-        await startArpeggio(arpeggioParams({ ...state, generatorId }));
-      } catch (error) {
-        console.error("Playback failed", error);
+      if (state.playing) {
+        try {
+          await startPlayback(nextParams);
+        } catch (error) {
+          console.error("Playback failed", error);
+        }
       }
       return;
     }
-    if (generatorId !== "arpeggio" && engineRef.current?.isRunning()) {
+    if (engineRef.current?.isRunning()) {
       try {
         engineRef.current.stop();
       } catch (error) {
@@ -304,7 +310,9 @@ export function Studio() {
           <PatternPreview
             preview={preview}
             playheadRef={playheadRef}
-            manual={state.generatorId === "arpeggio"}
+            manual={
+              state.generatorId === "arpeggio" || state.generatorId === "melody"
+            }
             page={page}
             onSelectPage={handleSelectPage}
             playing={state.playing}

@@ -1,9 +1,14 @@
 import { generateArpeggio } from "../audio/generators/arpeggio";
+import { generateMelody } from "../audio/generators/melody";
 import {
   ARPEGGIO_STEPS,
   type ArpeggioParams,
   type ArpeggioPatternName,
+  type MelodyContourName,
+  type MelodyParams,
+  type NoteLength,
   type StepLength,
+  type Waveform,
 } from "../audio/types";
 import { mulberry32 } from "./prng";
 import { GENERATOR_BY_ID } from "./generators";
@@ -178,12 +183,81 @@ function buildArpeggioGrid(inputs: PreviewInputs): GridPreview {
   };
 }
 
+function melodyFields(block: GeneratorBlock): MelodyParams["melody"] {
+  return {
+    waveform: str(block, "waveform") as Waveform,
+    contour: str(block, "contour") as MelodyContourName,
+    octaveRange: num(block, "octaveRange"),
+    noteLength: str(block, "noteLength") as NoteLength,
+    restProbability: num(block, "restProbability"),
+    leapiness: num(block, "leapiness"),
+    phraseLengthBars: num(block, "phraseLengthBars"),
+  };
+}
+
+export function melodyParams(state: StudioState): MelodyParams {
+  return {
+    seed: state.seed,
+    tempo: state.tempo,
+    root: state.root,
+    scale: state.scale,
+    density: state.density,
+    swing: state.swing,
+    effects: state.effects,
+    melody: melodyFields(state.blocks.melody),
+  };
+}
+
+export function engineParamsFor(
+  state: StudioState,
+): ArpeggioParams | MelodyParams | null {
+  if (state.generatorId === "arpeggio") return arpeggioParams(state);
+  if (state.generatorId === "melody") return melodyParams(state);
+  return null;
+}
+
+function buildMelodyGrid(inputs: PreviewInputs): GridPreview {
+  const params: MelodyParams = {
+    seed: inputs.seed,
+    tempo: inputs.tempo,
+    root: inputs.root,
+    scale: inputs.scale,
+    density: inputs.density,
+    swing: 0,
+    effects: {},
+    melody: melodyFields(inputs.blocks.melody),
+  };
+  const { events, range } = generateMelody(params);
+  const rows = GENERATOR_BY_ID.melody.rows;
+  const totalSteps = events.length;
+  const cells = Array.from({ length: rows * totalSteps }, () => false);
+  const span = range.max - range.min;
+
+  for (const event of events) {
+    if (!event) continue;
+    const normalized = span === 0 ? 0.5 : (event.midi - range.min) / span;
+    const row = Math.max(0, Math.min(rows - 1, Math.round((1 - normalized) * (rows - 1))));
+    cells[row * totalSteps + event.step] = true;
+  }
+
+  return {
+    kind: "grid",
+    rows,
+    totalSteps,
+    cells,
+    duration: (totalSteps * 15) / inputs.tempo,
+  };
+}
+
 export function buildPreviewFrom(inputs: PreviewInputs): Preview {
   const rand = mulberry32(inputs.seed);
   const block = inputs.blocks[inputs.generatorId];
 
   if (inputs.generatorId === "arpeggio") {
     return buildArpeggioGrid(inputs);
+  }
+  if (inputs.generatorId === "melody") {
+    return buildMelodyGrid(inputs);
   }
   if (inputs.generatorId === "ambient-pad") {
     return buildPad(block, inputs.tempo, rand);

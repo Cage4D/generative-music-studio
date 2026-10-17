@@ -112,3 +112,57 @@ export type ArpeggioResult = {
   archetype: ArchetypeId;
   range: ArpeggioRange;
 };
+
+// --- Melody ---------------------------------------------------------------
+
+// A phrase is built from fixed 16-step blocks; `phraseLengthBars` blocks make
+// the loop. The sequence subdivision comes from the melody's `noteLength`.
+export const PHRASE_STEPS = 16;
+
+export const MELODY_ARCHETYPES = [
+  "stepwise-arch",
+  "motif-and-variation",
+  "call-and-response",
+  "leap-and-fill",
+  "pedal-ostinato",
+  "sparse-lyrical",
+] as const;
+
+export type MelodyArchetypeId = (typeof MELODY_ARCHETYPES)[number];
+
+export type NoteLength = "2n" | "4n" | "8n" | "16n" | "32n";
+
+export type MelodyContourName =
+  | "ascending"
+  | "descending"
+  | "arch"
+  | "wave"
+  | "random";
+
+export type MelodyBlock = {
+  waveform: Waveform;
+  contour: MelodyContourName;
+  octaveRange: number;
+  noteLength: NoteLength;
+  restProbability: number;
+  leapiness: number;
+  phraseLengthBars: number;
+};
+
+export type MelodyParams = {
+  seed: number;
+  tempo: number;
+  root: NoteName;
+  scale: ScaleName;
+  density: number;
+  swing: number;
+  effects: StudioEffects;
+  melody: MelodyBlock;
+};
+
+export type MelodyResult = {
+  events: (NoteEvent | null)[];
+  voice: Voice;
+  archetype: MelodyArchetypeId;
+  range: ArpeggioRange;
+};
