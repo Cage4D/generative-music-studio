@@ -1,17 +1,20 @@
 import * as Tone from "tone";
 import { effectAmount, FILTER_MAX_HZ, filterCutoff } from "./effects";
 import { generateArpeggio } from "./generators/arpeggio";
+import { generateBassline } from "./generators/bassline";
 import { generateMelody } from "./generators/melody";
 import { stepSeconds } from "./theory";
 import { readDevFlags, type DevFlags } from "./dev-flags";
 import { hashEvents } from "./hash";
 import type { EffectId } from "../lib/studio-state";
 import type {
+  AnyVoiceKind,
   ArpeggioParams,
+  BassVoiceKind,
+  BasslineParams,
   MelodyParams,
   NoteEvent,
   Voice,
-  VoiceKind,
 } from "./types";
 
 export type StepListener = (step: number) => void;
@@ -29,17 +32,21 @@ const EFFECT_ORDER: EffectId[] = [
 ];
 
 type PersistentInstrument = {
-  kind: VoiceKind;
+  kind: AnyVoiceKind;
   source: Tone.MonoSynth | Tone.FMSynth | Tone.Synth;
   level: Tone.Gain;
   nodes: Tone.ToneAudioNode[];
   configure: (voice: Voice) => void;
 };
 
-export type EngineParams = ArpeggioParams | MelodyParams;
+export type EngineParams = ArpeggioParams | MelodyParams | BasslineParams;
 
 function isMelodyParams(params: EngineParams): params is MelodyParams {
   return "melody" in params;
+}
+
+function isBasslineParams(params: EngineParams): params is BasslineParams {
+  return "bass" in params;
 }
 
 type StepItem = {
@@ -63,8 +70,44 @@ const CHAIN_SETTLE_MS = FX_RAMP_SECONDS * 1000 + 30;
 const SCHEDULE_EPSILON = 0.001;
 const isDev = process.env.NODE_ENV !== "production";
 
+// The bass family plays in the lowest part of the spectrum (36-147 Hz), where
+// laptop speakers and small headphones roll off, so a plain sine is inaudible
+// there. A quiet harmonic an octave above the fundamental keeps the note
+// audible without moving its pitch or adding a single node to the graph.
+const BASS_PARTIALS: Partial<Record<BassVoiceKind, number[]>> = {
+  sub: [1, 0.25, 0.1],
+  "pluck-bass": [1, 0.4, 0.15],
+};
+
+// +2.5 dB of trim on the bass voices: the loudest one lands about 6 dB below
+// unity, which leaves headroom under the limiter while the bass still sits
+// under the lead voices instead of disappearing.
+const BASS_GAIN_TRIM = 1.33;
+
+/**
+ * A voice with no gain is silent, no matter what the sequence schedules.
+ */
+export function voiceIsSilent(voice: Voice): boolean {
+  return voice.gain <= 0;
+}
+
+/**
+ * Tone builds a custom wave from a list of partial amplitudes. The order
+ * matters: setting a basic type ("sine") resets the partial count, so the
+ * partials are applied after the oscillator type.
+ */
+function setOscillatorPartials(
+  source: Tone.MonoSynth | Tone.FMSynth | Tone.Synth,
+  partials: number[] | undefined,
+): void {
+  if (!partials) return;
+  const oscillator = (source as { oscillator?: { partials: number[] } }).oscillator;
+  if (!oscillator) return;
+  oscillator.partials = partials;
+}
+
 // Dev-only stand-ins used by `?voice=`, so a forced kind always has valid params.
-const FORCED_VOICES: Record<VoiceKind, Voice> = {
+const FORCED_VOICES: Record<AnyVoiceKind, Voice> = {
   pluck: {
     kind: "pluck",
     waveform: "triangle",
@@ -110,6 +153,52 @@ const FORCED_VOICES: Record<VoiceKind, Voice> = {
     filterFrequency: 1200,
     filterQ: 2,
     gain: 0.6,
+  },
+  sub: {
+    kind: "sub",
+    waveform: "sine",
+    attack: 0.01,
+    decay: 0.2,
+    sustain: 0.7,
+    release: 0.2,
+    gain: 0.4,
+    glide: 0,
+  },
+  "saw-lowpass": {
+    kind: "saw-lowpass",
+    waveform: "sawtooth",
+    attack: 0.005,
+    decay: 0.2,
+    sustain: 0.5,
+    release: 0.2,
+    filterFrequency: 1200,
+    filterQ: 1,
+    gain: 0.34,
+    glide: 0,
+  },
+  "soft-square": {
+    kind: "soft-square",
+    waveform: "square",
+    attack: 0.005,
+    decay: 0.2,
+    sustain: 0.5,
+    release: 0.2,
+    filterFrequency: 900,
+    filterQ: 0.7,
+    gain: 0.3,
+    glide: 0,
+  },
+  "pluck-bass": {
+    kind: "pluck-bass",
+    waveform: "triangle",
+    attack: 0.005,
+    decay: 0.15,
+    sustain: 0.1,
+    release: 0.2,
+    filterFrequency: 1500,
+    filterQ: 1.2,
+    gain: 0.36,
+    glide: 0,
   },
 };
 
@@ -164,6 +253,24 @@ function eventSignature(params: EngineParams): string {
       block.waveform,
     ].join("|");
   }
+  if (isBasslineParams(params)) {
+    const block = params.bass;
+    // The waveform, cutoff and glide only pick the timbre: they never change a
+    // note, but they do change the voice, so the sequence is rebuilt for them.
+    return [
+      "bassline",
+      params.seed,
+      params.root,
+      params.scale,
+      params.density,
+      block.style,
+      block.octave,
+      block.noteLength,
+      block.waveform,
+      block.cutoff,
+      block.glide,
+    ].join("|");
+  }
   const block = params.arpeggio;
   return [
     "arpeggio",
@@ -193,12 +300,16 @@ export class ArpeggioEngine {
   private readonly chainInput: Tone.Gain;
   private readonly flags: DevFlags;
 
-  private readonly instruments: Record<VoiceKind, PersistentInstrument>;
-  private activeKind: VoiceKind | null = null;
+  private readonly instruments: Record<AnyVoiceKind, PersistentInstrument>;
+  private activeKind: AnyVoiceKind | null = null;
+  // The level each instrument is heading for. The level nodes ramp, so their
+  // current value is 0 while a voice fades in: the intended target is what
+  // says whether the engine is actually silent.
+  private intendedLevels: Partial<Record<AnyVoiceKind, number>> = {};
 
   private sequence: Tone.Sequence<StepItem> | null = null;
   private params: EngineParams | null = null;
-  private generatorId: "arpeggio" | "melody" = "arpeggio";
+  private generatorId: "arpeggio" | "melody" | "bassline" = "arpeggio";
   private activeStepLength = "16n";
   private signature = "";
   private voiceSignature = "";
@@ -348,7 +459,7 @@ export class ArpeggioEngine {
     this.disposeSequence();
     this.onStep = null;
 
-    for (const kind of Object.keys(this.instruments) as VoiceKind[]) {
+    for (const kind of Object.keys(this.instruments) as AnyVoiceKind[]) {
       for (const node of this.instruments[kind].nodes) {
         try {
           node.dispose();
@@ -375,7 +486,7 @@ export class ArpeggioEngine {
     return this.running;
   }
 
-  private buildInstruments(): Record<VoiceKind, PersistentInstrument> {
+  private buildInstruments(): Record<AnyVoiceKind, PersistentInstrument> {
     const makeLevel = (): Tone.Gain => {
       const level = new Tone.Gain(0);
       level.connect(this.chainInput);
@@ -399,6 +510,26 @@ export class ArpeggioEngine {
     const softLevel = makeLevel();
     softSource.connect(softVibrato);
     softVibrato.connect(softLevel);
+
+    // The bass family. One persistent instrument per kind, so switching the
+    // voice never builds or disposes a synth while the transport runs.
+    const subSource = new Tone.Synth({ oscillator: { type: "sine" } });
+    const subLevel = makeLevel();
+    subSource.connect(subLevel);
+
+    const sawSource = new Tone.MonoSynth({ oscillator: { type: "sawtooth" } });
+    const sawLevel = makeLevel();
+    sawSource.connect(sawLevel);
+
+    const squareSource = new Tone.MonoSynth({ oscillator: { type: "square" } });
+    const squareLevel = makeLevel();
+    squareSource.connect(squareLevel);
+
+    const pluckBassSource = new Tone.MonoSynth({
+      oscillator: { type: "triangle" },
+    });
+    const pluckBassLevel = makeLevel();
+    pluckBassSource.connect(pluckBassLevel);
 
     return {
       pluck: {
@@ -504,6 +635,125 @@ export class ArpeggioEngine {
             },
           });
           buzzSource.volume.value = Tone.gainToDb(voice.gain);
+        },
+      },
+      sub: {
+        kind: "sub",
+        source: subSource,
+        level: subLevel,
+        nodes: [subSource, subLevel],
+        configure: (voice) => {
+          if (voice.kind !== "sub") return;
+          // The glide is a portamento: the pitch slides into the new note.
+          subSource.portamento = voice.glide;
+          subSource.set({
+            oscillator: { type: voice.waveform },
+            envelope: {
+              attack: voice.attack,
+              decay: voice.decay,
+              sustain: voice.sustain,
+              release: voice.release,
+            },
+          });
+          // A pure sine this low is inaudible on small speakers: blend in a
+          // quiet harmonic an octave up and keep the fundamental clean.
+          setOscillatorPartials(subSource, BASS_PARTIALS.sub);
+          subSource.volume.value = Tone.gainToDb(voice.gain * BASS_GAIN_TRIM);
+        },
+      },
+      "saw-lowpass": {
+        kind: "saw-lowpass",
+        source: sawSource,
+        level: sawLevel,
+        nodes: [sawSource, sawLevel],
+        configure: (voice) => {
+          if (voice.kind !== "saw-lowpass") return;
+          // The glide is a portamento: the pitch slides into the new note.
+          sawSource.portamento = voice.glide;
+          sawSource.set({
+            oscillator: { type: voice.waveform },
+            envelope: {
+              attack: voice.attack,
+              decay: voice.decay,
+              sustain: voice.sustain,
+              release: voice.release,
+            },
+            filter: { type: "lowpass", Q: voice.filterQ },
+            filterEnvelope: {
+              attack: 0.001,
+              decay: 0.05,
+              sustain: 1,
+              release: voice.release,
+              baseFrequency: voice.filterFrequency,
+              octaves: 0,
+            },
+          });
+          sawSource.volume.value = Tone.gainToDb(voice.gain * BASS_GAIN_TRIM);
+        },
+      },
+      "soft-square": {
+        kind: "soft-square",
+        source: squareSource,
+        level: squareLevel,
+        nodes: [squareSource, squareLevel],
+        configure: (voice) => {
+          if (voice.kind !== "soft-square") return;
+          // The glide is a portamento: the pitch slides into the new note.
+          squareSource.portamento = voice.glide;
+          squareSource.set({
+            oscillator: { type: voice.waveform },
+            envelope: {
+              attack: voice.attack,
+              decay: voice.decay,
+              sustain: voice.sustain,
+              release: voice.release,
+            },
+            filter: { type: "lowpass", Q: voice.filterQ },
+            filterEnvelope: {
+              attack: 0.001,
+              decay: 0.05,
+              sustain: 1,
+              release: voice.release,
+              baseFrequency: voice.filterFrequency,
+              octaves: 0,
+            },
+          });
+          squareSource.volume.value = Tone.gainToDb(voice.gain * BASS_GAIN_TRIM);
+        },
+      },
+      "pluck-bass": {
+        kind: "pluck-bass",
+        source: pluckBassSource,
+        level: pluckBassLevel,
+        nodes: [pluckBassSource, pluckBassLevel],
+        configure: (voice) => {
+          if (voice.kind !== "pluck-bass") return;
+          // The glide is a portamento: the pitch slides into the new note.
+          pluckBassSource.portamento = voice.glide;
+          pluckBassSource.set({
+            oscillator: { type: voice.waveform },
+            envelope: {
+              attack: voice.attack,
+              decay: voice.decay,
+              sustain: voice.sustain,
+              release: voice.release,
+            },
+            filter: { type: "lowpass", Q: voice.filterQ },
+            filterEnvelope: {
+              attack: 0.001,
+              decay: 0,
+              sustain: 0,
+              release: voice.release,
+              baseFrequency: voice.filterFrequency,
+              octaves: 2,
+            },
+          });
+          // A triangle alone is thin this low: a little extra harmonic keeps
+          // the note present on small speakers.
+          setOscillatorPartials(pluckBassSource, BASS_PARTIALS["pluck-bass"]);
+          pluckBassSource.volume.value = Tone.gainToDb(
+            voice.gain * BASS_GAIN_TRIM,
+          );
         },
       },
     };
@@ -657,12 +907,19 @@ export class ArpeggioEngine {
     if (!params) return;
     const start = now();
     const melody = isMelodyParams(params);
-    const result = melody ? generateMelody(params) : generateArpeggio(params);
+    const bass = isBasslineParams(params);
+    const result = bass
+      ? generateBassline(params)
+      : melody
+        ? generateMelody(params)
+        : generateArpeggio(params);
     const { events, voice, archetype } = result;
-    this.generatorId = melody ? "melody" : "arpeggio";
-    this.activeStepLength = melody
-      ? params.melody.noteLength
-      : params.arpeggio.stepLength;
+    this.generatorId = bass ? "bassline" : melody ? "melody" : "arpeggio";
+    this.activeStepLength = bass
+      ? params.bass.noteLength
+      : melody
+        ? params.melody.noteLength
+        : params.arpeggio.stepLength;
     const finalVoice = this.flags.forcedVoice
       ? FORCED_VOICES[this.flags.forcedVoice]
       : voice;
@@ -680,11 +937,26 @@ export class ArpeggioEngine {
     sequence.start(this.running ? transport.position : 0);
     this.sequence = sequence;
     const done = now();
+    const sounding = events.filter((event) => event !== null).length;
     if (isDev) {
-      const sounding = events.filter((event) => event !== null).length;
       console.debug(
         `[${this.generatorId}] buildSequence seed=${params.seed} archetype=${archetype} kind=${finalVoice.kind} sounding=${sounding} hash=${hashEvents(events)} generate=${(generated - start).toFixed(2)}ms total=${(done - start).toFixed(2)}ms ${contextInfo()}`,
       );
+      // A silent engine is the one failure the user cannot diagnose from the
+      // UI, so it is called out in the console.
+      if (sounding === 0) {
+        console.warn(
+          `[${this.generatorId}] no scheduled events: the pattern is empty, so nothing will sound`,
+        );
+      }
+      const allLevelsZero = Object.values(this.intendedLevels).every(
+        (level) => (level ?? 0) <= 0,
+      );
+      if (allLevelsZero || voiceIsSilent(finalVoice)) {
+        console.warn(
+          `[${this.generatorId}] every voice gain is 0 (voice gain=${finalVoice.gain}): the engine is silent`,
+        );
+      }
     }
   }
 
@@ -696,14 +968,16 @@ export class ArpeggioEngine {
     this.voiceSignature = signature;
     this.instruments[voice.kind].configure(voice);
     this.activeKind = voice.kind;
-    for (const kind of Object.keys(this.instruments) as VoiceKind[]) {
+    for (const kind of Object.keys(this.instruments) as AnyVoiceKind[]) {
+      const target = kind === voice.kind ? 1 : 0;
+      this.intendedLevels[kind] = target;
       const gain = this.instruments[kind].level.gain;
       gain.cancelScheduledValues(Tone.now());
-      gain.rampTo(kind === voice.kind ? 1 : 0, VOICE_FADE);
+      gain.rampTo(target, VOICE_FADE);
     }
     if (isDev) {
       console.debug(
-        `[arpeggio] voice kind=${voice.kind} ${kindChanged ? "switch" : "update"} ${(now() - start).toFixed(2)}ms`,
+        `[${this.generatorId}] voice kind=${voice.kind} ${kindChanged ? "switch" : "update"} ${(now() - start).toFixed(2)}ms`,
       );
     }
   }

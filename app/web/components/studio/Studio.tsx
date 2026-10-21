@@ -14,7 +14,12 @@ import { useSearchParams } from "next/navigation";
 import { CreatePatternSchema, type GeneratorId, type PatternResponse } from "@gms/shared";
 import type { ArpeggioEngine, ArpeggioEngineClass } from "@/audio/engine";
 import { readDevFlags } from "@/audio/dev-flags";
-import { type ArpeggioParams, type MelodyParams } from "@/audio/types";
+import {
+  type ArpeggioParams,
+  type BasslineParams,
+  type MelodyParams,
+  type NoteLength,
+} from "@/audio/types";
 import {
   ApiError,
   createPattern,
@@ -27,10 +32,15 @@ import {
   GENERATORS,
   GENERATOR_BY_ID,
   isGeneratorSupported,
+  saveDisabledFor,
 } from "@/lib/generators";
 import { hydrateState } from "@/lib/pattern-io";
 import { columnOf, PAGE_STEPS, pageOf } from "@/lib/paging";
-import { buildPreviewFrom, engineParamsFor } from "@/lib/preview";
+import {
+  bassColumnOfStep,
+  buildPreviewFrom,
+  engineParamsFor,
+} from "@/lib/preview";
 import { buildRequest } from "@/lib/request";
 import {
   createDefaultState,
@@ -93,6 +103,9 @@ export function Studio({ initialPattern }: StudioProps = {}) {
   const pageRef = useRef(0);
   const stepRef = useRef(-1);
   const totalStepsRef = useRef(0);
+  // The bass preview is a single page, so its engine steps are mapped onto the
+  // preview columns instead of using the paged layout.
+  const columnRef = useRef<(step: number) => number>(columnOf);
   const seedCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const searchParams = useSearchParams();
@@ -134,6 +147,17 @@ export function Studio({ initialPattern }: StudioProps = {}) {
     };
   }, [remixParam]);
 
+  useEffect(() => {
+    if (state.generatorId !== "bassline") {
+      columnRef.current = columnOf;
+      return;
+    }
+    const noteLength = String(
+      state.blocks.bassline.noteLength ?? "8n",
+    ) as NoteLength;
+    columnRef.current = (step: number) => bassColumnOfStep(step, noteLength);
+  }, [state.generatorId, state.blocks]);
+
   const applyPlayhead = useCallback(() => {
     const element = playheadRef.current;
     if (!element) return;
@@ -149,7 +173,7 @@ export function Studio({ initialPattern }: StudioProps = {}) {
       return;
     }
     const width = element.parentElement?.clientWidth ?? 0;
-    const position = ((columnOf(step) + 0.5) / PAGE_STEPS) * width;
+    const position = ((columnRef.current(step) + 0.5) / PAGE_STEPS) * width;
     element.style.visibility = "visible";
     element.style.transform = `translateX(${position}px)`;
   }, []);
@@ -234,7 +258,9 @@ export function Studio({ initialPattern }: StudioProps = {}) {
     return engine;
   }, [stepHandler]);
 
-  async function startPlayback(params: ArpeggioParams | MelodyParams) {
+  async function startPlayback(
+    params: ArpeggioParams | MelodyParams | BasslineParams,
+  ) {
     const tone = toneRef.current ?? (await import("tone"));
     toneRef.current = tone;
     await tone.start();
@@ -507,7 +533,9 @@ export function Studio({ initialPattern }: StudioProps = {}) {
             preview={preview}
             playheadRef={playheadRef}
             manual={
-              state.generatorId === "arpeggio" || state.generatorId === "melody"
+              state.generatorId === "arpeggio" ||
+              state.generatorId === "melody" ||
+              state.generatorId === "bassline"
             }
             page={page}
             onSelectPage={handleSelectPage}
@@ -546,7 +574,11 @@ export function Studio({ initialPattern }: StudioProps = {}) {
             title={state.title}
             parentSlug={state.parentSlug}
             status={renderSaveStatus()}
-            disabled={!validation.success || !supported || saving}
+            disabled={saveDisabledFor(
+              state.generatorId,
+              validation.success,
+              saving,
+            )}
             request={request}
             onTitleChange={(value) => dispatch({ type: "setTitle", value })}
             onSave={handleSave}

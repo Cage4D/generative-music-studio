@@ -9,6 +9,9 @@
   --acc: #7f9cf5;
   --acc2: #c3d0f5;
   --wave: #a9bbe8;
+  /* The size of one preview cell. Every grid preview uses it, so a cell
+     looks the same whether the generator draws six rows or four. */
+  --cell: 25px;
   --mono: var(--font-jetbrains-mono), "JetBrains Mono", ui-monospace, monospace;
   color-scheme: dark;
 }

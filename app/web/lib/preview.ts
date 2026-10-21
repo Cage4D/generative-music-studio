@@ -1,9 +1,16 @@
 import { generateArpeggio } from "../audio/generators/arpeggio";
+import {
+  bassStepsPerBar,
+  generateBassline,
+} from "../audio/generators/bassline";
 import { generateMelody } from "../audio/generators/melody";
 import {
   ARPEGGIO_STEPS,
   type ArpeggioParams,
   type ArpeggioPatternName,
+  type BassBlock,
+  type BassStyleName,
+  type BasslineParams,
   type MelodyContourName,
   type MelodyParams,
   type NoteLength,
@@ -12,13 +19,23 @@ import {
 } from "../audio/types";
 import { mulberry32 } from "./prng";
 import { GENERATOR_BY_ID } from "./generators";
+import { PAGE_STEPS } from "./paging";
 import type { GeneratorBlock, StudioState } from "./studio-state";
+
+export type GridNote = {
+  /** 0..1: how hard the note is hit. */
+  velocity: number;
+  /** 0..1: how long the note lasts, relative to the longest note. */
+  duration: number;
+};
 
 export type GridPreview = {
   kind: "grid";
   rows: number;
   totalSteps: number;
   cells: boolean[];
+  /** Optional per-cell note detail, parallel to `cells`. */
+  notes?: (GridNote | undefined)[];
   duration: number;
   barEvery?: number;
 };
@@ -50,6 +67,7 @@ export type PreviewInputs = Pick<
 
 const num = (block: GeneratorBlock, key: string): number => Number(block[key]);
 const str = (block: GeneratorBlock, key: string): string => String(block[key]);
+const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
 
 function buildPad(block: GeneratorBlock, tempo: number, rand: () => number): PadPreview {
   const chordLengthBars = num(block, "chordLengthBars");
@@ -183,8 +201,96 @@ function buildArpeggioGrid(inputs: PreviewInputs): GridPreview {
   };
 }
 
-function melodyFields(block: GeneratorBlock): MelodyParams["melody"] {
+export function basslineFields(block: GeneratorBlock): BassBlock {
   return {
+    waveform: str(block, "waveform") as Waveform,
+    octave: num(block, "octave"),
+    style: str(block, "style") as BassStyleName,
+    noteLength: str(block, "noteLength") as NoteLength,
+    glide: num(block, "glide"),
+    cutoff: num(block, "cutoff"),
+  };
+}
+
+export function basslineParams(state: StudioState): BasslineParams {
+  return {
+    seed: state.seed,
+    tempo: state.tempo,
+    root: state.root,
+    scale: state.scale,
+    density: state.density,
+    swing: state.swing,
+    effects: state.effects,
+    bass: basslineFields(state.blocks.bassline),
+  };
+}
+
+/**
+ * The bass preview is always one page of 16 columns. A column is an eighth
+ * note of the two-bar phrase, so a finer note grid is projected onto it.
+ */
+export function bassColumnOfStep(step: number, noteLength: NoteLength): number {
+  const stepsPerBar = bassStepsPerBar(noteLength);
+  const sixteenths = (step * 16) / stepsPerBar;
+  const column = Math.floor(sixteenths / 2);
+  return Math.max(0, Math.min(PAGE_STEPS - 1, column));
+}
+
+function buildBasslineGrid(inputs: PreviewInputs): GridPreview {
+  const params: BasslineParams = {
+    seed: inputs.seed,
+    tempo: inputs.tempo,
+    root: inputs.root,
+    scale: inputs.scale,
+    density: inputs.density,
+    swing: 0,
+    effects: {},
+    bass: basslineFields(inputs.blocks.bassline),
+  };
+  const { events, pool } = generateBassline(params);
+  const rows = GENERATOR_BY_ID.bassline.rows;
+  const totalSteps = PAGE_STEPS;
+  const cells = Array.from({ length: rows * totalSteps }, () => false);
+  const notes: (GridNote | undefined)[] = Array.from(
+    { length: rows * totalSteps },
+    () => undefined,
+  );
+  // The pitch of the line, relative to the root, compressed into the few rows
+  // the grid has: the lowest pool tone is the bottom row.
+  const lowest = pool[0];
+  const highest = pool[pool.length - 1];
+  const span = highest - lowest;
+  const longestGate = events.reduce(
+    (longest, event) => Math.max(longest, event?.gate ?? 0),
+    0,
+  );
+
+  for (const event of events) {
+    if (!event) continue;
+    const normalized = span === 0 ? 0 : (event.midi - lowest) / span;
+    const fromBottom = Math.round(normalized * (rows - 1));
+    const row = rows - 1 - fromBottom;
+    const column = bassColumnOfStep(event.step, params.bass.noteLength);
+    const index = row * totalSteps + column;
+    cells[index] = true;
+    notes[index] = {
+      velocity: clamp01(event.velocity),
+      duration:
+        longestGate > 0 ? clamp01(event.gate / longestGate) : 1,
+    };
+  }
+
+  return {
+    kind: "grid",
+    rows,
+    totalSteps,
+    cells,
+    notes,
+    duration: (totalSteps * 30) / inputs.tempo,
+  };
+}
+
+function melodyFields(block: GeneratorBlock): MelodyParams["melody"] {  return {
     waveform: str(block, "waveform") as Waveform,
     contour: str(block, "contour") as MelodyContourName,
     octaveRange: num(block, "octaveRange"),
@@ -210,9 +316,10 @@ export function melodyParams(state: StudioState): MelodyParams {
 
 export function engineParamsFor(
   state: StudioState,
-): ArpeggioParams | MelodyParams | null {
+): ArpeggioParams | MelodyParams | BasslineParams | null {
   if (state.generatorId === "arpeggio") return arpeggioParams(state);
   if (state.generatorId === "melody") return melodyParams(state);
+  if (state.generatorId === "bassline") return basslineParams(state);
   return null;
 }
 
@@ -258,6 +365,9 @@ export function buildPreviewFrom(inputs: PreviewInputs): Preview {
   }
   if (inputs.generatorId === "melody") {
     return buildMelodyGrid(inputs);
+  }
+  if (inputs.generatorId === "bassline") {
+    return buildBasslineGrid(inputs);
   }
   if (inputs.generatorId === "ambient-pad") {
     return buildPad(block, inputs.tempo, rand);

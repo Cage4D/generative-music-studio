@@ -10,7 +10,7 @@ import {
   type MelodyParams,
   type MelodyResult,
   type NoteEvent,
-  type Voice,
+  type LeadVoice,
   type VoiceKind,
   type Waveform,
 } from "../types";
@@ -136,7 +136,7 @@ function resolveIndex(pool: number[], base: number, near: number): number {
   return best;
 }
 
-function buildVoice(rand: () => number, waveform: Waveform): Voice {
+function buildVoice(rand: () => number, waveform: Waveform): LeadVoice {
   const kind = pick(rand, VOICE_KINDS);
   switch (kind) {
     case "pluck":
@@ -413,7 +413,7 @@ type Prepared = {
   archetype: MelodyArchetypeId;
   pool: number[];
   base: number;
-  voice: Voice;
+  voice: LeadVoice;
   total: number;
   blockLen: number;
   skeleton: boolean[];

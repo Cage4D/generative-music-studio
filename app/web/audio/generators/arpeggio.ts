@@ -12,7 +12,7 @@ import {
   type ArpeggioPatternName,
   type ArpeggioResult,
   type NoteEvent,
-  type Voice,
+  type LeadVoice,
   type VoiceKind,
   type Waveform,
 } from "../types";
@@ -115,7 +115,7 @@ function buildPool(
   return pool.sort((a, b) => a - b);
 }
 
-function buildVoice(rand: () => number): Voice {
+function buildVoice(rand: () => number): LeadVoice {
   const kind = pick(rand, VOICE_KINDS);
   switch (kind) {
     case "pluck":
@@ -183,7 +183,7 @@ type Prepared = {
   barShift: number[];
   accentTemplate: boolean[];
   gates: number[];
-  voice: Voice;
+  voice: LeadVoice;
 };
 
 function prepare(params: ArpeggioParams): Prepared {

@@ -185,10 +185,23 @@ export const GENERATOR_BY_ID = Object.fromEntries(
 export const SUPPORTED_GENERATOR_IDS = [
   "arpeggio",
   "melody",
+  "bassline",
 ] as const satisfies readonly GeneratorId[];
 
 export function isGeneratorSupported(generatorId: GeneratorId): boolean {
   return (SUPPORTED_GENERATOR_IDS as readonly GeneratorId[]).includes(
     generatorId,
   );
+}
+
+/**
+ * The one rule that decides whether the save button is live: a generator
+ * needs a working engine behind it, a valid request and no save in flight.
+ */
+export function saveDisabledFor(
+  generatorId: GeneratorId,
+  valid: boolean,
+  saving: boolean,
+): boolean {
+  return !valid || !isGeneratorSupported(generatorId) || saving;
 }

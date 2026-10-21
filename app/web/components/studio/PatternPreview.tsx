@@ -1,6 +1,22 @@
 import type { CSSProperties, Ref } from "react";
 import { PAGE_STEPS, pageCount } from "@/lib/paging";
-import type { Preview } from "@/lib/preview";
+import type { GridNote, Preview } from "@/lib/preview";
+
+// A note is drawn a little smaller than its cell, so its size can carry the
+// duration and the velocity. The width is capped at the cell, so a long note
+// never spills into the next step.
+const NOTE_MIN_WIDTH = 0.7;
+const NOTE_MIN_HEIGHT = 0.8;
+
+function noteStyle(note: GridNote | undefined): CSSProperties | undefined {
+  if (!note) return undefined;
+  return {
+    justifySelf: "center",
+    alignSelf: "center",
+    width: `${(NOTE_MIN_WIDTH + (1 - NOTE_MIN_WIDTH) * note.duration) * 100}%`,
+    height: `${(NOTE_MIN_HEIGHT + (1 - NOTE_MIN_HEIGHT) * note.velocity) * 100}%`,
+  };
+}
 
 function Grid({
   preview,
@@ -9,7 +25,7 @@ function Grid({
   preview: Extract<Preview, { kind: "grid" }>;
   page: number;
 }) {
-  const { rows, totalSteps, cells } = preview;
+  const { rows, totalSteps, cells, notes } = preview;
   const barEvery = preview.barEvery ?? 4;
   const pages = pageCount(totalSteps);
   const activePage = Math.max(0, Math.min(page, pages - 1));
@@ -31,7 +47,9 @@ function Grid({
       className="g"
       style={{
         gridTemplateColumns: `repeat(${PAGE_STEPS}, 1fr)`,
-        gridTemplateRows: `repeat(${rows}, 1fr)`,
+        // The cell size comes from the shared --cell token, so a grid with
+        // four rows has the same cells as one with eight.
+        gridTemplateRows: `repeat(${rows}, minmax(0, var(--cell)))`,
       }}
     >
       {visible.map((on, index) => {
@@ -40,7 +58,13 @@ function Grid({
         const classes = `c${on ? " on" : ""}${brighter ? " b" : ""}${
           dim[index] ? " dim" : ""
         }`;
-        return <i key={index} className={classes} />;
+        return (
+          <i
+            key={index}
+            className={classes}
+            style={on ? noteStyle(notes?.[index]) : undefined}
+          />
+        );
       })}
     </div>
   );
