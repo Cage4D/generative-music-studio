@@ -46,7 +46,7 @@ export function SaveCard({
       >
         {parentSlug ? "Save remix" : "Save & get link"}
       </button>
-      <div id="out" role="status">
+      <div id="out" role="status" aria-live="polite" aria-atomic="true">
         {status}
       </div>
       <details>

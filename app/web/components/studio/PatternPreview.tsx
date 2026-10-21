@@ -96,6 +96,7 @@ export function PatternPreview({
   page = 0,
   onSelectPage,
   playing = false,
+  alt,
 }: {
   preview: Preview;
   playheadRef?: Ref<HTMLDivElement>;
@@ -103,6 +104,7 @@ export function PatternPreview({
   page?: number;
   onSelectPage?: (page: number) => void;
   playing?: boolean;
+  alt?: string;
 }) {
   const pages = preview.kind === "grid" ? pageCount(preview.totalSteps) : 1;
   const activePage = Math.max(0, Math.min(page, pages - 1));
@@ -117,20 +119,22 @@ export function PatternPreview({
               <button
                 key={index}
                 type="button"
+                aria-label={`Show page ${index + 1} of ${pages}`}
+                aria-current={index === activePage ? "true" : undefined}
                 className={index === activePage ? "on" : undefined}
-                disabled={playing}
                 onClick={() => onSelectPage?.(index)}
+                disabled={playing}
               >
                 {index + 1}
               </button>
             ))}
           </div>
         )}
-        <span className="lv">
+        <span className="lv" aria-hidden="true">
           <i />
         </span>
       </div>
-      <div className="in">
+      <div className="in" role="img" aria-label={alt}>
         {preview.kind === "pad" && <Pad preview={preview} />}
         {preview.kind === "texture" && <Texture preview={preview} />}
         {preview.kind === "grid" && (

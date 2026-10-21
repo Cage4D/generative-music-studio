@@ -17,9 +17,25 @@ const jetbrainsMono = localFont({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000",
+  ),
   title: "Generative Music Studio",
   description:
     "Deterministic procedural music. Same settings, same seed, same music.",
+  openGraph: {
+    type: "website",
+    siteName: "Generative Music Studio",
+    title: "Generative Music Studio",
+    description:
+      "Deterministic procedural music. Same settings, same seed, same music.",
+  },
+  twitter: {
+    card: "summary",
+    title: "Generative Music Studio",
+    description:
+      "Deterministic procedural music. Same settings, same seed, same music.",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -28,7 +44,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={`${manrope.variable} ${jetbrainsMono.variable}`}
     >
-      <body>{children}</body>
+      <body>
+        <a className="skip" href="#main">
+          Skip to content
+        </a>
+        {children}
+      </body>
     </html>
   );
 }

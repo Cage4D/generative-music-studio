@@ -1,4 +1,6 @@
-import type { CSSProperties } from "react";
+"use client";
+
+import { useId, type CSSProperties } from "react";
 import { NOTE_NAMES, SCALES } from "@gms/shared";
 import { GENERATOR_BY_ID, type Field } from "@/lib/generators";
 import {
@@ -17,12 +19,19 @@ type Props = {
   onEffectChange: (key: EffectId, value: number) => void;
 };
 
+function valueText(value: number, unit?: string): string {
+  if (unit === "percent") return `${Math.round(value * 100)} percent`;
+  if (unit) return `${value} ${unit}`;
+  return String(value);
+}
+
 function SliderRow({
   label,
   min,
   max,
   step,
   value,
+  unit,
   onChange,
 }: {
   label: string;
@@ -30,23 +39,26 @@ function SliderRow({
   max: number;
   step: number;
   value: number;
+  unit?: string;
   onChange: (value: number) => void;
 }) {
+  const id = useId();
   const fill = ((value - min) / (max - min)) * 100;
   return (
     <div className="r">
-      <label>{label}</label>
+      <label htmlFor={id}>{label}</label>
       <input
+        id={id}
         type="range"
         min={min}
         max={max}
         step={step}
         value={value}
-        aria-label={label}
+        aria-valuetext={valueText(value, unit)}
         style={{ "--p": `${fill}%` } as CSSProperties}
         onChange={(event) => onChange(Number(event.target.value))}
       />
-      <output>{value}</output>
+      <output htmlFor={id}>{value}</output>
     </div>
   );
 }
@@ -62,12 +74,13 @@ function SelectRow({
   value: string | number;
   onChange: (value: number | string) => void;
 }) {
+  const id = useId();
   const numeric = typeof options[0] === "number";
   return (
     <div className="r">
-      <label>{label}</label>
+      <label htmlFor={id}>{label}</label>
       <select
-        aria-label={label}
+        id={id}
         value={String(value)}
         onChange={(event) =>
           onChange(numeric ? Number(event.target.value) : event.target.value)
@@ -109,6 +122,7 @@ function FieldRow({
       max={field.max}
       step={field.step}
       value={Number(block[field.key])}
+      unit={field.unit}
       onChange={(value) => onBlockChange(field.key, value)}
     />
   );
@@ -133,6 +147,7 @@ export function ParamsPanel({
           max={220}
           step={1}
           value={state.tempo}
+          unit="BPM"
           onChange={(value) => onSharedChange("tempo", value)}
         />
         <SelectRow
@@ -153,6 +168,7 @@ export function ParamsPanel({
           max={1}
           step={0.05}
           value={state.density}
+          unit="percent"
           onChange={(value) => onSharedChange("density", value)}
         />
         <SliderRow
@@ -161,6 +177,7 @@ export function ParamsPanel({
           max={1}
           step={0.05}
           value={state.swing}
+          unit="percent"
           onChange={(value) => onSharedChange("swing", value)}
         />
       </details>
@@ -177,16 +194,17 @@ export function ParamsPanel({
         ))}
       </details>
 
-      <details>
+      <details open>
         <summary>Effects</summary>
         {EFFECT_IDS.map((effect) => (
           <SliderRow
             key={effect}
-            label={effect[0].toUpperCase() + effect.slice(1)}
+            label={effect}
             min={0}
             max={1}
             step={0.05}
             value={state.effects[effect] ?? 0}
+            unit="percent"
             onChange={(value) => onEffectChange(effect, value)}
           />
         ))}

@@ -23,12 +23,12 @@ export function Header() {
           Generative <em>Music</em> Studio
         </span>
       </span>
-      <nav>
+      <nav aria-label="Primary">
         <Link className="on" href="/">
           Studio
         </Link>
-        <span className="off" title="Coming soon">
-          Gallery
+        <span className="off" aria-disabled="true">
+          Gallery<span className="sr-only"> (coming soon)</span>
         </span>
         <span className="tag">Preview</span>
       </nav>

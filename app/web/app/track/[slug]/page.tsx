@@ -1,6 +1,24 @@
 import { Suspense } from "react";
+import type { Metadata } from "next";
 import { TrackShell } from "@/components/studio/TrackShell";
 import { TrackView } from "@/components/studio/TrackView";
+import { getPattern } from "@/lib/api";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  try {
+    const { pattern } = await getPattern(slug);
+    const title = `Generative Music Studio: ${pattern.generatorId} seed ${pattern.params.seed}`;
+    const description = `A ${pattern.generatorId} pattern, seed ${pattern.params.seed}. Open it in Generative Music Studio to listen and remix.`;
+    return { title, description, openGraph: { title, description } };
+  } catch {
+    return { title: `Generative Music Studio: ${slug}` };
+  }
+}
 
 function LoadingTrack() {
   return (

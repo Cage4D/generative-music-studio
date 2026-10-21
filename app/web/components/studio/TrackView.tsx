@@ -44,7 +44,7 @@ export function TrackView({ slug }: { slug: string }) {
   if (state.status === "loading") {
     return (
       <TrackShell>
-        <p className="track-title">Loading track…</p>
+        <h1 className="track-title">Loading track…</h1>
         <p className="track-copy">
           Fetching <b>{slug}</b> from the server.
         </p>
@@ -55,7 +55,7 @@ export function TrackView({ slug }: { slug: string }) {
   if (state.status === "notFound") {
     return (
       <TrackShell>
-        <p className="track-title">This track doesn&apos;t exist.</p>
+        <h1 className="track-title">This track doesn&apos;t exist.</h1>
         <p className="track-copy">
           No pattern matches <b>{slug}</b>.
         </p>
@@ -69,7 +69,7 @@ export function TrackView({ slug }: { slug: string }) {
   if (state.status === "error") {
     return (
       <TrackShell>
-        <p className="track-title">We couldn&apos;t load this track.</p>
+        <h1 className="track-title">We couldn&apos;t load this track.</h1>
         <p className="track-copy">{state.message}</p>
         <button
           type="button"

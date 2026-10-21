@@ -89,9 +89,11 @@ export function Studio({ initialPattern }: StudioProps = {}) {
 
   const [page, setPage] = useState(0);
   const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
+  const [seedCopied, setSeedCopied] = useState(false);
   const pageRef = useRef(0);
   const stepRef = useRef(-1);
   const totalStepsRef = useRef(0);
+  const seedCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const searchParams = useSearchParams();
   const remixParam = initialPattern ? null : searchParams.get("remix");
@@ -175,6 +177,7 @@ export function Studio({ initialPattern }: StudioProps = {}) {
     return () => {
       mountedRef.current = false;
       if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      if (seedCopyTimerRef.current) clearTimeout(seedCopyTimerRef.current);
       try {
         engineRef.current?.dispose();
       } catch (error) {
@@ -456,6 +459,9 @@ export function Studio({ initialPattern }: StudioProps = {}) {
   async function copySeed() {
     try {
       await navigator.clipboard.writeText(String(state.seed));
+      setSeedCopied(true);
+      if (seedCopyTimerRef.current) clearTimeout(seedCopyTimerRef.current);
+      seedCopyTimerRef.current = setTimeout(() => setSeedCopied(false), 1500);
     } catch {
       // clipboard access can be denied; nothing to do
     }
@@ -476,8 +482,13 @@ export function Studio({ initialPattern }: StudioProps = {}) {
       <Background />
       <div className="grain" aria-hidden="true" />
       <Header />
-      <main>
-        <section>
+      <main id="main" tabIndex={-1}>
+        <section
+          id="generator-panel"
+          role="tabpanel"
+          aria-labelledby={`tab-${state.generatorId}`}
+          tabIndex={-1}
+        >
           <GeneratorTabs
             activeId={state.generatorId}
             onSelect={handleSelectGenerator}
@@ -501,10 +512,12 @@ export function Studio({ initialPattern }: StudioProps = {}) {
             page={page}
             onSelectPage={handleSelectPage}
             playing={state.playing}
+            alt={`Pattern preview: ${activeGenerator.name}, seed ${state.seed}, ${state.tempo} BPM, root ${state.root}, ${state.scale} scale.`}
           />
           <Transport
             seed={state.seed}
             playing={state.playing}
+            seedCopied={seedCopied}
             onTogglePlay={handleTogglePlay}
             onSeedChange={(value) => dispatch({ type: "setSeed", value })}
             onShuffle={shuffleSeed}

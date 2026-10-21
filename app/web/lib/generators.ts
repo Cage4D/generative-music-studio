@@ -22,6 +22,9 @@ export type SliderField = {
   max: number;
   step: number;
   defaultValue: number;
+  // Human unit for assistive tech (e.g. "percent", "Hz", "octaves"). Purely
+  // presentational metadata; it never reaches the audio engine.
+  unit?: string;
 };
 
 export type Field = SelectField | SliderField;
@@ -49,7 +52,17 @@ const slider = (
   max: number,
   step: number,
   defaultValue: number,
-): SliderField => ({ kind: "slider", key, label, min, max, step, defaultValue });
+  unit?: string,
+): SliderField => ({
+  kind: "slider",
+  key,
+  label,
+  min,
+  max,
+  step,
+  defaultValue,
+  unit,
+});
 
 export const GENERATORS: readonly GeneratorMeta[] = [
   {
@@ -60,7 +73,7 @@ export const GENERATORS: readonly GeneratorMeta[] = [
     lede: "Broken chords that step through the scale, one note at a time.",
     fields: [
       select("pattern", "Pattern", ["up", "down", "up-down", "random"], "up-down"),
-      slider("octaves", "Octaves", 1, 4, 1, 2),
+      slider("octaves", "Octaves", 1, 4, 1, 2, "octaves"),
       select("stepLength", "Step length", ["4n", "8n", "16n", "32n"], "16n"),
     ],
   },
@@ -72,12 +85,12 @@ export const GENERATORS: readonly GeneratorMeta[] = [
     lede: "Slow, wide chords that swell and dissolve into the background.",
     fields: [
       select("waveform", "Waveform", WAVEFORMS, "sine"),
-      slider("chordSize", "Chord size", 2, 5, 1, 3),
+      slider("chordSize", "Chord size", 2, 5, 1, 3, "notes"),
       select("voicing", "Voicing", ["close", "open", "wide"], "open"),
-      slider("chordLengthBars", "Chord bars", 1, 8, 1, 2),
+      slider("chordLengthBars", "Chord bars", 1, 8, 1, 2, "bars"),
       slider("attack", "Attack (s)", 0.01, 8, 0.01, 2),
       slider("release", "Release (s)", 0.1, 12, 0.1, 4),
-      slider("drift", "Drift", 0, 1, 0.05, 0.3),
+      slider("drift", "Drift", 0, 1, 0.05, 0.3, "percent"),
     ],
   },
   {
@@ -95,9 +108,9 @@ export const GENERATORS: readonly GeneratorMeta[] = [
       ),
       select("kit", "Kit", ["acoustic", "electronic", "lofi"], "electronic"),
       select("steps", "Steps", [8, 16, 32], 16),
-      slider("ghostNotes", "Ghost notes", 0, 1, 0.05, 0.2),
-      slider("fills", "Fills", 0, 1, 0.05, 0.2),
-      slider("hatDensity", "Hat density", 0, 1, 0.05, 0.6),
+      slider("ghostNotes", "Ghost notes", 0, 1, 0.05, 0.2, "percent"),
+      slider("fills", "Fills", 0, 1, 0.05, 0.2, "percent"),
+      slider("hatDensity", "Hat density", 0, 1, 0.05, 0.6, "percent"),
     ],
   },
   {
@@ -108,7 +121,7 @@ export const GENERATORS: readonly GeneratorMeta[] = [
     lede: "A low, steady voice that anchors the harmony.",
     fields: [
       select("waveform", "Waveform", WAVEFORMS, "sawtooth"),
-      slider("octave", "Octave", 1, 3, 1, 2),
+      slider("octave", "Octave", 1, 3, 1, 2, "octaves"),
       select(
         "style",
         "Style",
@@ -116,8 +129,8 @@ export const GENERATORS: readonly GeneratorMeta[] = [
         "walking",
       ),
       select("noteLength", "Note length", NOTE_LENGTHS, "8n"),
-      slider("glide", "Glide", 0, 1, 0.05, 0.1),
-      slider("cutoff", "Cutoff (Hz)", 100, 8000, 50, 1200),
+      slider("glide", "Glide", 0, 1, 0.05, 0.1, "percent"),
+      slider("cutoff", "Cutoff (Hz)", 100, 8000, 50, 1200, "Hz"),
     ],
   },
   {
@@ -134,10 +147,10 @@ export const GENERATORS: readonly GeneratorMeta[] = [
         ["lowpass", "highpass", "bandpass"],
         "lowpass",
       ),
-      slider("filterFrequency", "Frequency (Hz)", 20, 20000, 10, 2000),
-      slider("movementRate", "Move rate (Hz)", 0.01, 10, 0.01, 0.4),
-      slider("movementDepth", "Move depth", 0, 1, 0.05, 0.5),
-      slider("crackle", "Crackle", 0, 1, 0.05, 0.1),
+      slider("filterFrequency", "Frequency (Hz)", 20, 20000, 10, 2000, "Hz"),
+      slider("movementRate", "Move rate (Hz)", 0.01, 10, 0.01, 0.4, "Hz"),
+      slider("movementDepth", "Move depth", 0, 1, 0.05, 0.5, "percent"),
+      slider("crackle", "Crackle", 0, 1, 0.05, 0.1, "percent"),
     ],
   },
   {
@@ -154,11 +167,11 @@ export const GENERATORS: readonly GeneratorMeta[] = [
         ["ascending", "descending", "arch", "wave", "random"],
         "arch",
       ),
-      slider("octaveRange", "Octave range", 1, 3, 1, 2),
+      slider("octaveRange", "Octave range", 1, 3, 1, 2, "octaves"),
       select("noteLength", "Note length", NOTE_LENGTHS, "8n"),
-      slider("restProbability", "Rests", 0, 1, 0.05, 0.2),
-      slider("leapiness", "Leapiness", 0, 1, 0.05, 0.3),
-      slider("phraseLengthBars", "Phrase bars", 1, 8, 1, 4),
+      slider("restProbability", "Rests", 0, 1, 0.05, 0.2, "percent"),
+      slider("leapiness", "Leapiness", 0, 1, 0.05, 0.3, "percent"),
+      slider("phraseLengthBars", "Phrase bars", 1, 8, 1, 4, "bars"),
     ],
   },
 ];

@@ -3,6 +3,7 @@ import { SEED_MAX } from "@gms/shared";
 type Props = {
   seed: number;
   playing: boolean;
+  seedCopied: boolean;
   onTogglePlay: () => void;
   onSeedChange: (seed: number) => void;
   onShuffle: () => void;
@@ -12,6 +13,7 @@ type Props = {
 export function Transport({
   seed,
   playing,
+  seedCopied,
   onTogglePlay,
   onSeedChange,
   onShuffle,
@@ -26,7 +28,7 @@ export function Transport({
         aria-label={playing ? "Stop" : "Play"}
         onClick={onTogglePlay}
       >
-        {playing ? "❚❚" : "▶"}
+        <span aria-hidden="true">{playing ? "❚❚" : "▶"}</span>
       </button>
       <div className="sd">
         <label htmlFor="seed">Seed</label>
@@ -36,15 +38,29 @@ export function Transport({
           min={0}
           max={SEED_MAX}
           step={1}
+          inputMode="numeric"
           value={seed}
           onChange={(event) => onSeedChange(Number(event.target.value))}
         />
-        <button type="button" className="btn" onClick={onShuffle}>
+        <button
+          type="button"
+          className="btn"
+          aria-label="Shuffle seed"
+          onClick={onShuffle}
+        >
           Shuffle
         </button>
-        <button type="button" className="btn" onClick={onCopySeed}>
+        <button
+          type="button"
+          className="btn"
+          aria-label="Copy seed"
+          onClick={onCopySeed}
+        >
           Copy
         </button>
+        <span className="sr-only" role="status" aria-live="polite">
+          {seedCopied ? "Seed copied to clipboard" : ""}
+        </span>
       </div>
     </div>
   );

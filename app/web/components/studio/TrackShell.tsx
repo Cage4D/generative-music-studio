@@ -9,9 +9,9 @@ export function TrackShell({ children }: { children: ReactNode }) {
       <Background />
       <div className="grain" aria-hidden="true" />
       <Header />
-      <div className="track">
+      <main className="track" id="main" tabIndex={-1}>
         <div className="card">{children}</div>
-      </div>
+      </main>
       <Footer />
     </div>
   );
