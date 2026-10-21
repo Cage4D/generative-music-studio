@@ -9,8 +9,8 @@ import {
 import type { GeneratorId } from "@gms/shared";
 import { GeneratorTabs } from "./GeneratorTabs";
 
-const COMING_SOON: GeneratorId[] = ["drum-pattern", "ambient-pad", "texture"];
-const SUPPORTED: GeneratorId[] = ["arpeggio", "melody", "bassline"];
+const COMING_SOON: GeneratorId[] = ["ambient-pad", "texture"];
+const SUPPORTED: GeneratorId[] = ["arpeggio", "melody", "bassline", "drum-pattern"];
 
 function tabFor(id: GeneratorId): HTMLElement {
   const generator = GENERATORS.find((entry) => entry.id === id);
@@ -23,6 +23,13 @@ describe("generator support", () => {
     render(<GeneratorTabs activeId="bassline" onSelect={() => {}} />);
 
     const tab = tabFor("bassline");
+    expect(tab.textContent).not.toMatch(/soon/i);
+    expect(tab.querySelector(".soon")).toBeNull();
+  });
+
+  it("does not mark the drums tab as coming soon", () => {
+    render(<GeneratorTabs activeId="drum-pattern" onSelect={() => {}} />);
+    const tab = tabFor("drum-pattern");
     expect(tab.textContent).not.toMatch(/soon/i);
     expect(tab.querySelector(".soon")).toBeNull();
   });
@@ -55,6 +62,11 @@ describe("generator support", () => {
     expect(saveDisabledFor("bassline", true, false)).toBe(false);
   });
 
+  it("enables saving for the drums", () => {
+    expect(isGeneratorSupported("drum-pattern")).toBe(true);
+    expect(saveDisabledFor("drum-pattern", true, false)).toBe(false);
+  });
+
   it("keeps saving disabled for the generators that are coming soon", () => {
     for (const id of COMING_SOON) {
       expect(isGeneratorSupported(id)).toBe(false);
@@ -65,5 +77,7 @@ describe("generator support", () => {
   it("keeps saving disabled while a save is running or the request is invalid", () => {
     expect(saveDisabledFor("bassline", true, true)).toBe(true);
     expect(saveDisabledFor("bassline", false, false)).toBe(true);
+    expect(saveDisabledFor("drum-pattern", true, true)).toBe(true);
+    expect(saveDisabledFor("drum-pattern", false, false)).toBe(true);
   });
 });

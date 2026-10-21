@@ -3,14 +3,20 @@ import {
   bassStepsPerBar,
   generateBassline,
 } from "../audio/generators/bassline";
+import { generateDrums } from "../audio/generators/drums";
 import { generateMelody } from "../audio/generators/melody";
 import {
   ARPEGGIO_STEPS,
+  DRUM_LANES,
   type ArpeggioParams,
   type ArpeggioPatternName,
   type BassBlock,
   type BassStyleName,
   type BasslineParams,
+  type DrumBlock,
+  type DrumKitName,
+  type DrumParams,
+  type DrumStyleName,
   type MelodyContourName,
   type MelodyParams,
   type NoteLength,
@@ -106,33 +112,19 @@ function buildGrid(
   inputs: PreviewInputs,
   rand: () => number,
 ): GridPreview {
-  const block = inputs.blocks[inputs.generatorId];
   const generator = GENERATOR_BY_ID[inputs.generatorId];
   const rows = generator.rows;
-  const isDrums = inputs.generatorId === "drum-pattern";
-  const totalSteps = isDrums ? num(block, "steps") : 16;
+  const totalSteps = 16;
   const cells: boolean[] = [];
 
-  if (isDrums) {
-    const probabilities = [0.3, 0.22, num(block, "hatDensity"), 0.18];
-    const fourOnFloor = str(block, "style") === "four-on-floor";
-    for (let row = 0; row < rows; row++) {
-      for (let column = 0; column < totalSteps; column++) {
-        let on = rand() < probabilities[row] * (0.5 + inputs.density);
-        if (fourOnFloor && row === 0) on = column % 4 === 0;
-        cells.push(on);
-      }
-    }
-  } else {
-    const picks = Array.from({ length: totalSteps }, () => [
-      Math.floor(rand() * rows),
-      rand() < inputs.density,
-    ] as const);
-    for (let row = 0; row < rows; row++) {
-      for (let column = 0; column < totalSteps; column++) {
-        const [pickRow, active] = picks[column];
-        cells.push(active && pickRow === row);
-      }
+  const picks = Array.from({ length: totalSteps }, () => [
+    Math.floor(rand() * rows),
+    rand() < inputs.density,
+  ] as const);
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < totalSteps; column++) {
+      const [pickRow, active] = picks[column];
+      cells.push(active && pickRow === row);
     }
   }
 
@@ -314,12 +306,92 @@ export function melodyParams(state: StudioState): MelodyParams {
   };
 }
 
+export function drumFields(block: GeneratorBlock): DrumBlock {
+  return {
+    style: str(block, "style") as DrumStyleName,
+    kit: str(block, "kit") as DrumKitName,
+    steps: num(block, "steps") as DrumBlock["steps"],
+    ghostNotes: num(block, "ghostNotes"),
+    fills: num(block, "fills"),
+    hatDensity: num(block, "hatDensity"),
+  };
+}
+
+export function drumParams(state: StudioState): DrumParams {
+  return {
+    seed: state.seed,
+    tempo: state.tempo,
+    root: state.root,
+    scale: state.scale,
+    density: state.density,
+    swing: state.swing,
+    effects: state.effects,
+    drums: drumFields(state.blocks["drum-pattern"]),
+  };
+}
+
+// The length of one drum step, in milliseconds, for the three step grids.
+const DRUM_STEP_MS: Record<DrumBlock["steps"], number> = {
+  8: 30,
+  16: 15,
+  32: 7.5,
+};
+
+/**
+ * The drum preview is the real pattern: one row per lane, one column per
+ * step. The note size carries the velocity, so a ghost note reads as a small
+ * dot next to a full hit.
+ */
+function buildDrumGrid(inputs: PreviewInputs): GridPreview {
+  const block = inputs.blocks["drum-pattern"];
+  const params: DrumParams = {
+    seed: inputs.seed,
+    tempo: inputs.tempo,
+    root: inputs.root,
+    scale: inputs.scale,
+    density: inputs.density,
+    swing: 0,
+    effects: {},
+    drums: drumFields(block),
+  };
+  const result = generateDrums(params);
+  const rows = DRUM_LANES.length;
+  const totalSteps = result.totalSteps;
+  const cells = Array.from({ length: rows * totalSteps }, () => false);
+  const notes: (GridNote | undefined)[] = Array.from(
+    { length: rows * totalSteps },
+    () => undefined,
+  );
+
+  result.steps.forEach((events, step) => {
+    for (const event of events) {
+      const row = DRUM_LANES.indexOf(event.lane);
+      if (row < 0) continue;
+      const index = row * totalSteps + step;
+      cells[index] = true;
+      notes[index] = { velocity: clamp01(event.velocity), duration: 1 };
+    }
+  });
+
+  return {
+    kind: "grid",
+    rows,
+    totalSteps,
+    cells,
+    notes,
+    // The brighter cells mark the beats, like the other grids do.
+    barEvery: Math.max(1, Math.round(result.stepsPerBar / 4)),
+    duration: (totalSteps * DRUM_STEP_MS[params.drums.steps]) / inputs.tempo,
+  };
+}
+
 export function engineParamsFor(
   state: StudioState,
-): ArpeggioParams | MelodyParams | BasslineParams | null {
+): ArpeggioParams | MelodyParams | BasslineParams | DrumParams | null {
   if (state.generatorId === "arpeggio") return arpeggioParams(state);
   if (state.generatorId === "melody") return melodyParams(state);
   if (state.generatorId === "bassline") return basslineParams(state);
+  if (state.generatorId === "drum-pattern") return drumParams(state);
   return null;
 }
 
@@ -368,6 +440,9 @@ export function buildPreviewFrom(inputs: PreviewInputs): Preview {
   }
   if (inputs.generatorId === "bassline") {
     return buildBasslineGrid(inputs);
+  }
+  if (inputs.generatorId === "drum-pattern") {
+    return buildDrumGrid(inputs);
   }
   if (inputs.generatorId === "ambient-pad") {
     return buildPad(block, inputs.tempo, rand);

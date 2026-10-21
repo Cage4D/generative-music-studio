@@ -2,16 +2,25 @@ import * as Tone from "tone";
 import { effectAmount, FILTER_MAX_HZ, filterCutoff } from "./effects";
 import { generateArpeggio } from "./generators/arpeggio";
 import { generateBassline } from "./generators/bassline";
+import { drumStepLength, generateDrums } from "./generators/drums";
 import { generateMelody } from "./generators/melody";
+import {
+  buildDrumInstrument,
+  drumInstrumentKeys,
+  type DrumInstrument,
+} from "./drum-kit";
 import { stepSeconds } from "./theory";
 import { readDevFlags, type DevFlags } from "./dev-flags";
-import { hashEvents } from "./hash";
+import { hashDrumEvents, hashEvents } from "./hash";
 import type { EffectId } from "../lib/studio-state";
 import type {
   AnyVoiceKind,
   ArpeggioParams,
   BassVoiceKind,
   BasslineParams,
+  DrumEvent,
+  DrumKitName,
+  DrumParams,
   MelodyParams,
   NoteEvent,
   Voice,
@@ -39,7 +48,11 @@ type PersistentInstrument = {
   configure: (voice: Voice) => void;
 };
 
-export type EngineParams = ArpeggioParams | MelodyParams | BasslineParams;
+export type EngineParams =
+  | ArpeggioParams
+  | MelodyParams
+  | BasslineParams
+  | DrumParams;
 
 function isMelodyParams(params: EngineParams): params is MelodyParams {
   return "melody" in params;
@@ -49,13 +62,20 @@ function isBasslineParams(params: EngineParams): params is BasslineParams {
   return "bass" in params;
 }
 
+function isDrumParams(params: EngineParams): params is DrumParams {
+  return "drums" in params;
+}
+
 type StepItem = {
   index: number;
   note: NoteEvent | null;
+  /** The drum lanes that sound on this step. */
+  drums?: DrumEvent[];
 };
 
 const TONE_LOOKAHEAD = 0.1;
 const VOICE_FADE = 0.05;
+const KIT_FADE = 0.06;
 const REBUILD_DEBOUNCE_MS = 120;
 const MASTER_LIMIT_DB = -1;
 const METER_INTERVAL_MS = 1000;
@@ -89,6 +109,20 @@ const BASS_GAIN_TRIM = 1.33;
  */
 export function voiceIsSilent(voice: Voice): boolean {
   return voice.gain <= 0;
+}
+
+/**
+ * The length of a drum hit, in seconds. An open hat that is choked by the
+ * next hat is cut short: the distance to that hat is counted in steps, so the
+ * tempo changes the sound without changing the event.
+ */
+export function drumHitDuration(
+  event: DrumEvent,
+  base: number,
+  secondsPerStep: number,
+): number {
+  if (event.choke <= 0) return base;
+  return Math.max(0.01, Math.min(base, event.choke * secondsPerStep));
 }
 
 /**
@@ -271,6 +305,22 @@ function eventSignature(params: EngineParams): string {
       block.glide,
     ].join("|");
   }
+  if (isDrumParams(params)) {
+    const block = params.drums;
+    // The kit is a timbre: it never changes a note, but it does change the
+    // instruments, so the sequence is rebuilt for it.
+    return [
+      "drum-pattern",
+      params.seed,
+      params.density,
+      block.style,
+      block.kit,
+      block.steps,
+      block.ghostNotes,
+      block.fills,
+      block.hatDensity,
+    ].join("|");
+  }
   const block = params.arpeggio;
   return [
     "arpeggio",
@@ -307,9 +357,16 @@ export class ArpeggioEngine {
   // says whether the engine is actually silent.
   private intendedLevels: Partial<Record<AnyVoiceKind, number>> = {};
 
+  // One persistent instrument per lane and kit. Switching the kit crossfades
+  // the lane levels, it never builds or disposes a synth.
+  private readonly drumInstruments = new Map<string, DrumInstrument>();
+  private drumKit: DrumKitName | null = null;
+  private drumLevels: Record<string, number> = {};
+
   private sequence: Tone.Sequence<StepItem> | null = null;
   private params: EngineParams | null = null;
-  private generatorId: "arpeggio" | "melody" | "bassline" = "arpeggio";
+  private generatorId: "arpeggio" | "melody" | "bassline" | "drum-pattern" =
+    "arpeggio";
   private activeStepLength = "16n";
   private signature = "";
   private voiceSignature = "";
@@ -366,6 +423,7 @@ export class ArpeggioEngine {
     this.wireChain(this.activeEffects());
 
     this.instruments = this.buildInstruments();
+    this.buildDrumInstruments();
 
     if (isDev) this.startMeterMonitor();
     this.startDriftMonitor();
@@ -468,6 +526,17 @@ export class ArpeggioEngine {
         }
       }
     }
+
+    for (const instrument of this.drumInstruments.values()) {
+      for (const node of instrument.nodes) {
+        try {
+          node.dispose();
+        } catch {
+          // Already disposed.
+        }
+      }
+    }
+    this.drumInstruments.clear();
 
     this.distortion.dispose();
     this.phaser.dispose();
@@ -759,6 +828,41 @@ export class ArpeggioEngine {
     };
   }
 
+  private buildDrumInstruments(): void {
+    for (const { lane, kit } of drumInstrumentKeys()) {
+      const instrument = buildDrumInstrument(lane, kit, this.chainInput);
+      this.drumInstruments.set(`${lane}:${kit}`, instrument);
+      this.drumLevels[`${lane}:${kit}`] = 0;
+    }
+  }
+
+  /**
+   * The kit crossfades the lane levels. Every instrument is already built, so
+   * the kit never builds or disposes a synth while the transport runs.
+   */
+  private applyDrumKit(kit: DrumKitName): void {
+    if (this.drumKit === kit) return;
+    const previous = this.drumKit;
+    this.drumKit = kit;
+    for (const key of this.drumInstruments.keys()) {
+      const instrument = this.drumInstruments.get(key);
+      if (!instrument) continue;
+      const target = instrument.kit === kit ? 1 : 0;
+      if (target === 1 && !previous) {
+        // The first kit fades in with the rest of the engine.
+        instrument.level.gain.setValueAtTime(0, Tone.now());
+        instrument.level.gain.rampTo(1, KIT_FADE);
+      } else {
+        instrument.level.gain.cancelScheduledValues(Tone.now());
+        instrument.level.gain.rampTo(target, KIT_FADE);
+      }
+      this.drumLevels[key] = target;
+    }
+    if (isDev) {
+      console.debug(`[drum-pattern] kit=${kit}`);
+    }
+  }
+
   private applyLive(): void {
     const params = this.params;
     if (!params) return;
@@ -905,6 +1009,10 @@ export class ArpeggioEngine {
   private buildSequence(): void {
     const params = this.params;
     if (!params) return;
+    if (isDrumParams(params)) {
+      this.buildDrumSequence(params);
+      return;
+    }
     const start = now();
     const melody = isMelodyParams(params);
     const bass = isBasslineParams(params);
@@ -960,6 +1068,51 @@ export class ArpeggioEngine {
     }
   }
 
+  private buildDrumSequence(params: DrumParams): void {
+    const start = now();
+    const result = generateDrums(params);
+    this.generatorId = "drum-pattern";
+    this.activeStepLength = drumStepLength(params.drums.steps);
+    this.applyDrumKit(params.drums.kit);
+    this.disposeSequence();
+    const items: StepItem[] = result.steps.map((drums, index) => ({
+      index,
+      note: null,
+      drums,
+    }));
+    const sequence = new Tone.Sequence<StepItem>(
+      (time, item) => this.onSequenceStep(time, item),
+      items,
+      this.activeStepLength,
+    );
+    sequence.loop = true;
+    const transport = Tone.getTransport();
+    sequence.start(this.running ? transport.position : 0);
+    this.sequence = sequence;
+    const events = result.steps.flat();
+    const done = now();
+    if (isDev) {
+      console.debug(
+        `[drum-pattern] buildSequence seed=${params.seed} archetype=${result.archetype} kit=${params.drums.kit} steps=${result.totalSteps} sounding=${events.length} hash=${hashDrumEvents(events)} generate=${(done - start).toFixed(2)}ms total=${(done - start).toFixed(2)}ms ${contextInfo()}`,
+      );
+      // A silent engine is the one failure the user cannot diagnose from the
+      // UI, so it is called out in the console.
+      if (events.length === 0) {
+        console.warn(
+          `[drum-pattern] no scheduled events: the pattern is empty, so nothing will sound`,
+        );
+      }
+      const allLevelsZero = Object.values(this.drumLevels).every(
+        (level) => (level ?? 0) <= 0,
+      );
+      if (allLevelsZero) {
+        console.warn(
+          `[drum-pattern] every drum lane gain is 0: the engine is silent`,
+        );
+      }
+    }
+  }
+
   private applyVoice(voice: Voice): void {
     const signature = JSON.stringify(voice);
     if (signature === this.voiceSignature) return;
@@ -989,25 +1142,29 @@ export class ArpeggioEngine {
       const step = item.index;
       Tone.getDraw().schedule(() => this.onStep?.(step), time);
     }
-    const instrument = this.activeKind ? this.instruments[this.activeKind] : null;
-    if (item.note && this.params && instrument) {
-      const seconds = stepSeconds(this.activeStepLength, this.params.tempo);
-      const offset =
-        item.index % 2 === 1 ? (this.params.swing * seconds) / 3 : 0;
-      // Keep starts strictly increasing: if this step is late, Tone would clamp
-      // it to context.currentTime, which can collide with the previous note.
-      const startTime = Math.max(
-        time + offset,
-        Tone.now(),
-        this.lastNoteStart + SCHEDULE_EPSILON,
-      );
-      this.lastNoteStart = startTime;
-      instrument.source.triggerAttackRelease(
-        Tone.Frequency(item.note.midi, "midi").toFrequency(),
-        item.note.gate * seconds,
-        startTime,
-        item.note.velocity,
-      );
+    if (item.drums && item.drums.length > 0 && this.params) {
+      this.onDrumStep(time, item);
+    } else {
+      const instrument = this.activeKind ? this.instruments[this.activeKind] : null;
+      if (item.note && this.params && instrument) {
+        const seconds = stepSeconds(this.activeStepLength, this.params.tempo);
+        const offset =
+          item.index % 2 === 1 ? (this.params.swing * seconds) / 3 : 0;
+        // Keep starts strictly increasing: if this step is late, Tone would clamp
+        // it to context.currentTime, which can collide with the previous note.
+        const startTime = Math.max(
+          time + offset,
+          Tone.now(),
+          this.lastNoteStart + SCHEDULE_EPSILON,
+        );
+        this.lastNoteStart = startTime;
+        instrument.source.triggerAttackRelease(
+          Tone.Frequency(item.note.midi, "midi").toFrequency(),
+          item.note.gate * seconds,
+          startTime,
+          item.note.velocity,
+        );
+      }
     }
     if (isDev) {
       const elapsed = now() - start;
@@ -1019,6 +1176,35 @@ export class ArpeggioEngine {
           `[${this.generatorId}] step ${item.index} callback ${elapsed.toFixed(2)}ms exceeds ${STEP_WARN_MS}ms`,
         );
       }
+    }
+  }
+
+  /**
+   * The drum lanes of one step. Every lane plays its own instrument, so
+   * several lanes can sound on the same step without fighting over a voice.
+   */
+  private onDrumStep(time: number, item: StepItem): void {
+    const params = this.params;
+    if (!params || !item.drums) return;
+    const seconds = stepSeconds(this.activeStepLength, params.tempo);
+    const offset = item.index % 2 === 1 ? (params.swing * seconds) / 3 : 0;
+    for (const event of item.drums) {
+      const instrument = this.drumInstruments.get(
+        `${event.lane}:${this.drumKit ?? "electronic"}`,
+      );
+      if (!instrument) continue;
+      // Keep starts strictly increasing, the same way the melodic voices do.
+      const startTime = Math.max(
+        time + offset,
+        Tone.now(),
+        this.lastNoteStart + SCHEDULE_EPSILON,
+      );
+      this.lastNoteStart = startTime;
+      instrument.trigger(
+        drumHitDuration(event, instrument.duration, seconds),
+        startTime,
+        event.velocity,
+      );
     }
   }
 

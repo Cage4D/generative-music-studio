@@ -97,7 +97,7 @@ export const GENERATORS: readonly GeneratorMeta[] = [
     id: "drum-pattern",
     name: "Drum pattern",
     blockName: "drums",
-    rows: 4,
+    rows: 6,
     lede: "Kick, snare and hats laid out on a step grid.",
     fields: [
       select(
@@ -186,6 +186,7 @@ export const SUPPORTED_GENERATOR_IDS = [
   "arpeggio",
   "melody",
   "bassline",
+  "drum-pattern",
 ] as const satisfies readonly GeneratorId[];
 
 export function isGeneratorSupported(generatorId: GeneratorId): boolean {

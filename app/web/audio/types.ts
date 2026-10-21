@@ -294,3 +294,87 @@ export type MelodyResult = {
   archetype: MelodyArchetypeId;
   range: ArpeggioRange;
 };
+
+// --- Drums ----------------------------------------------------------------
+
+// The lanes of the kit. Every event names the lane it belongs to, so the
+// hash covers the lane as well as the step, the velocity and the choke.
+export const DRUM_LANES = [
+  "kick",
+  "snare",
+  "clap",
+  "closed-hat",
+  "open-hat",
+  "perc",
+] as const;
+
+export type DrumLane = (typeof DRUM_LANES)[number];
+
+export const DRUM_ARCHETYPES = [
+  "four-on-floor",
+  "boom-bap",
+  "breakbeat",
+  "half-time",
+  "euclid-polyrhythm",
+  "sparse-minimal",
+] as const;
+
+export type DrumArchetypeId = (typeof DRUM_ARCHETYPES)[number];
+
+// The style setting is a prior over the archetype draw, not a choice: every
+// archetype stays reachable from every style.
+export const DRUM_STYLES = [
+  "four-on-floor",
+  "breakbeat",
+  "halftime",
+  "trap",
+] as const;
+
+export type DrumStyleName = (typeof DRUM_STYLES)[number];
+
+// The kit is a timbre, so it never changes a note.
+export const DRUM_KITS = ["acoustic", "electronic", "lofi"] as const;
+
+export type DrumKitName = (typeof DRUM_KITS)[number];
+
+export type DrumBlock = {
+  style: DrumStyleName;
+  kit: DrumKitName;
+  steps: 8 | 16 | 32;
+  ghostNotes: number;
+  fills: number;
+  hatDensity: number;
+};
+
+export type DrumParams = {
+  seed: number;
+  tempo: number;
+  root: NoteName;
+  scale: ScaleName;
+  density: number;
+  swing: number;
+  effects: StudioEffects;
+  drums: DrumBlock;
+};
+
+export type DrumEvent = {
+  step: number;
+  lane: DrumLane;
+  velocity: number;
+  /**
+   * How many steps away the next hat is, when that hat damps this one.
+   * Zero means nothing damps it. The distance is counted in steps, so the
+   * tempo can change the sound without changing the events.
+   */
+  choke: number;
+};
+
+export type DrumResult = {
+  /** One entry per step: the lanes that sound on that step. */
+  steps: DrumEvent[][];
+  archetype: DrumArchetypeId;
+  totalSteps: number;
+  stepsPerBar: number;
+  /** The lanes that sound at least once. */
+  lanes: DrumLane[];
+};

@@ -33,7 +33,7 @@ const tone = vi.hoisted(() => {
     }
   }
 
-  const store: any = { gains: [], synths: [], sequences: [] };
+  const store: any = { gains: [], synths: [], sequences: [], membrane: [], noise: [] };
 
   class BaseNode {
     connections = new Set<any>();
@@ -118,6 +118,39 @@ const tone = vi.hoisted(() => {
   class MonoSynth extends Synth {}
   class FMSynth extends Synth {}
 
+
+  class MembraneSynth extends BaseNode {
+    pitchDecay: number;
+    octaves: number;
+    envelope: any;
+    volume = new Param(0);
+    triggerAttackRelease = vi.fn();
+    constructor(options: any = {}) {
+      super();
+      this.pitchDecay = options?.pitchDecay ?? 0.05;
+      this.octaves = options?.octaves ?? 3;
+      this.envelope = options?.envelope;
+      if (store.membrane) store.membrane.push(this);
+    }
+  }
+  class Noise {
+    type = "white";
+    constructor(options: any = {}) {
+      this.type = options?.type ?? "white";
+    }
+  }
+  class NoiseSynth extends BaseNode {
+    noise: Noise;
+    envelope: any;
+    triggerAttackRelease = vi.fn();
+    constructor(options: any = {}) {
+      super();
+      this.noise = new Noise(options?.noise);
+      this.envelope = options?.envelope;
+      if (store.noise) store.noise.push(this);
+    }
+  }
+
   class Sequence extends BaseNode {
     loop = false;
     start = vi.fn();
@@ -176,6 +209,9 @@ const tone = vi.hoisted(() => {
     MonoSynth,
     FMSynth,
     Synth,
+    MembraneSynth,
+    Noise,
+    NoiseSynth,
     Sequence,
   };
 });
