@@ -4,6 +4,10 @@ import { TrackShell } from "@/components/studio/TrackShell";
 import { TrackView } from "@/components/studio/TrackView";
 import { getPattern } from "@/lib/api";
 
+// The API may be asleep (free tier) or unreachable, so the metadata fetch
+// gets a short timeout and no retries: the page must still render.
+const METADATA_TIMEOUT_MS = 2500;
+
 export async function generateMetadata({
   params,
 }: {
@@ -11,7 +15,10 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   try {
-    const { pattern } = await getPattern(slug);
+    const { pattern } = await getPattern(slug, {
+      timeoutMs: METADATA_TIMEOUT_MS,
+      retries: 0,
+    });
     const title = `Generative Music Studio: ${pattern.generatorId} seed ${pattern.params.seed}`;
     const description = `A ${pattern.generatorId} pattern, seed ${pattern.params.seed}. Open it in Generative Music Studio to listen and remix.`;
     return { title, description, openGraph: { title, description } };

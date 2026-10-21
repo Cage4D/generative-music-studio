@@ -6,10 +6,14 @@
   "scripts": {
     "build:shared": "pnpm --filter @gms/shared build",
     "dev:shared": "pnpm --filter @gms/shared dev",
-    "build:api": "pnpm run build:shared && pnpm --filter api run build",
+    "prisma:generate": "pnpm --filter api run prisma:generate",
+    "prisma:deploy": "pnpm --filter api run prisma:deploy",
+    "build:api": "pnpm run build:shared && pnpm run prisma:generate && pnpm --filter api run build",
     "clean:api": "pnpm --filter api run clean:dist",
     "dev:api": "pnpm --filter api start:dev",
     "dev:web": "pnpm --filter web dev",
-    "build": "pnpm run build:api && pnpm --filter web build"
+    "build": "pnpm run build:api && pnpm --filter web build",
+    "lint": "pnpm --filter api lint && pnpm --filter web lint",
+    "test": "pnpm --filter api test && pnpm --filter web test"
   }
 }

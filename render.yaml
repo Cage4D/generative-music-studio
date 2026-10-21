@@ -1,0 +1,38 @@
+# Render blueprint for the Generative Music Studio API.
+# Values for secret variables are not stored here: set them in the Render
+# dashboard (or with `render env` / the API) and keep them out of git.
+services:
+  - type: web
+    name: generative-music-studio-api
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    autoDeploy: true
+    # The pnpm workspace lives in ./app. Dev dependencies are installed too
+    # because the build needs the Prisma CLI and the Nest CLI.
+    buildCommand: cd app && pnpm install --frozen-lockfile --prod=false && pnpm run build:api
+    # `prisma migrate deploy` is idempotent, so applying migrations on boot
+    # keeps a fresh database in sync without an extra manual step.
+    startCommand: cd app && pnpm --filter api run prisma:deploy && pnpm --filter api run start:prod
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: NODE_ENV
+        value: production
+      # Render injects PORT automatically; do not set it here.
+      # Secret: the hosted Postgres connection string.
+      - key: DATABASE_URL
+        sync: false
+      # Secret: comma separated list of allowed browser origins, e.g.
+      # "https://studio.example.com". A wildcard is rejected in production.
+      - key: CORS_ORIGINS
+        sync: false
+      # Number of proxy hops to trust for the client IP (Render is one hop).
+      - key: TRUST_PROXY
+        value: "1"
+      - key: RATE_LIMIT_MAX
+        value: "120"
+      - key: RATE_LIMIT_WINDOW_MS
+        value: "60000"

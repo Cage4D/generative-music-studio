@@ -27,4 +27,10 @@ describe('AppController', () => {
       expect(appController.getHello()).toBeTruthy();
     });
   });
+
+  describe('health', () => {
+    it('reports ok', () => {
+      expect(appController.health()).toEqual({ status: 'ok' });
+    });
+  });
 });

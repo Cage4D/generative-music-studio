@@ -71,6 +71,11 @@ describe("Patterns (e2e)", () => {
     return request(app.getHttpServer()).get("/").expect(200);
   });
 
+  it("GET /health reports ok", async () => {
+    const res = await request(app.getHttpServer()).get("/health").expect(200);
+    expect(res.body).toEqual({ status: "ok" });
+  });
+
   it("POST /patterns rejects an invalid body with 400", () => {
     return request(app.getHttpServer())
       .post("/patterns")
