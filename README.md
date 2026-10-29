@@ -228,14 +228,31 @@ Audio is the one thing the automated tests can't judge. The review process for e
 
 ## Deploying
 
-The suggested free-tier setup is **Neon** (Postgres), **Render** (API) and **Vercel** (web). Order matters:
+The whole stack can run as one **Vercel** project using [Vercel Services](https://vercel.com/docs/services), with **Neon** for Postgres. `app/vercel.json` defines two services: `web` (Next.js) and `api` (NestJS). The API is exposed at `/api` and the service strips that prefix before NestJS sees the request.
 
-1. **Neon.** Create a project and copy the **direct** connection string. From `app/`, run `pnpm prisma:deploy` once with that `DATABASE_URL` to apply migrations. The Render build does not run them.
-2. **Render.** New → Blueprint → select this repo (it reads `render.yaml`). Set `DATABASE_URL` and a placeholder `CORS_ORIGINS`. Deploy and check `https://<api-host>/health`.
-3. **Vercel.** New Project with Root Directory `app/web`, and turn on **Include source files outside the Root Directory** (the shared package lives outside it). Set `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_SITE_URL` for Build and Production, then deploy.
-4. **Close the loop.** Put the Vercel URL in `CORS_ORIGINS` on Render and redeploy the API. Until then, saving from the live site fails with CORS errors.
+1. **Neon.** Create a project and copy both connection strings: the **pooled** URL for the running API, and the **direct** URL for migrations.
+2. **Migrate.** From `app/`, apply the schema once with the direct URL:
 
-Render's free tier sleeps when idle, so the first save after a quiet spell can take a while. The UI shows "Waking the server…" and waits it out.
+   ```bash
+   DATABASE_URL="postgresql://...direct..." pnpm prisma:deploy
+   ```
+
+   Run this again whenever the Prisma schema changes. Vercel builds do not run migrations.
+3. **Vercel.** New Project → Root Directory `app`. Vercel reads `app/vercel.json` and builds both services. Set these environment variables for Production (and Preview if you deploy previews):
+
+   | Variable | Value |
+   | --- | --- |
+   | `DATABASE_URL` | Neon pooled connection string |
+   | `NEXT_PUBLIC_API_URL` | `https://<your-domain>/api` |
+   | `NEXT_PUBLIC_SITE_URL` | `https://<your-domain>` |
+   | `CORS_ORIGINS` | `https://<your-domain>` |
+   | `TRUST_PROXY` | `1` |
+   | `RATE_LIMIT_MAX` | `120` |
+   | `RATE_LIMIT_WINDOW_MS` | `60000` |
+
+4. **Verify.** Open `https://<your-domain>/api/health`, then save a track and open its share link.
+
+The rate limiter is in-memory and therefore per function instance on Vercel. Treat it as a best-effort backstop; use Vercel Firewall or a shared Redis/Upstash limiter if you need a hard global limit. `render.yaml` remains available if you prefer a long-running API instead.
 
 ## Design influences
 
