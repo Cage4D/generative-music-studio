@@ -137,7 +137,7 @@ export const GENERATORS: readonly GeneratorMeta[] = [
     id: "texture",
     name: "Texture",
     blockName: "texture",
-    rows: 0,
+    rows: 6,
     lede: "Filtered noise that drifts and shimmers underneath.",
     fields: [
       select("noiseType", "Noise", ["white", "pink", "brown"], "pink"),
@@ -180,14 +180,16 @@ export const GENERATOR_BY_ID = Object.fromEntries(
   GENERATORS.map((generator) => [generator.id, generator]),
 ) as Record<GeneratorId, GeneratorMeta>;
 
-// Generators with a real audio engine and preview. The rest are visible but
-// marked "coming soon" and cannot be saved.
+// Generators with a real audio engine and preview. All six are supported
+// today; the list stays explicit so a future unknown id can still fall back to
+// a disabled Save instead of guessing.
 export const SUPPORTED_GENERATOR_IDS = [
   "arpeggio",
   "melody",
   "bassline",
   "drum-pattern",
   "ambient-pad",
+  "texture",
 ] as const satisfies readonly GeneratorId[];
 
 export function isGeneratorSupported(generatorId: GeneratorId): boolean {

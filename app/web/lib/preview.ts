@@ -5,6 +5,7 @@ import {
 } from "../audio/generators/bassline";
 import { generateDrums } from "../audio/generators/drums";
 import { generatePads } from "../audio/generators/pads";
+import { generateTexture } from "../audio/generators/texture";
 import { generateMelody } from "../audio/generators/melody";
 import {
   ARPEGGIO_STEPS,
@@ -25,6 +26,7 @@ import {
   type Waveform,
   type PadBlock,
   type PadParams,
+  type TextureParams,
 } from "../audio/types";
 import { mulberry32 } from "./prng";
 import { GENERATOR_BY_ID } from "./generators";
@@ -58,13 +60,7 @@ export type PadPreview = {
   }[];
 };
 
-export type TexturePreview = {
-  kind: "texture";
-  duration: number;
-  bars: { height: number; duration: number; delay: number }[];
-};
-
-export type Preview = GridPreview | PadPreview | TexturePreview;
+export type Preview = GridPreview | PadPreview;
 
 // Everything the preview rendering depends on. Effects and swing are excluded
 // because generateArpeggio ignores them, so changing them must not force a
@@ -78,23 +74,6 @@ const num = (block: GeneratorBlock, key: string): number => Number(block[key]);
 const str = (block: GeneratorBlock, key: string): string => String(block[key]);
 const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
 
-
-function buildTexture(
-  block: GeneratorBlock,
-  rand: () => number,
-): TexturePreview {
-  const movementRate = num(block, "movementRate");
-  const movementDepth = num(block, "movementDepth");
-  const duration = Math.min(6, Math.max(0.6, 2 / movementRate));
-
-  const bars = Array.from({ length: 44 }, () => ({
-    height: 15 + (25 + rand() * 60) * (0.35 + movementDepth * 0.65),
-    duration,
-    delay: -(rand() * 3),
-  }));
-
-  return { kind: "texture", duration: 1, bars };
-}
 
 function buildGrid(
   inputs: PreviewInputs,
@@ -375,12 +354,20 @@ function buildDrumGrid(inputs: PreviewInputs): GridPreview {
 
 export function engineParamsFor(
   state: StudioState,
-): ArpeggioParams | MelodyParams | BasslineParams | DrumParams | PadParams | null {
+):
+  | ArpeggioParams
+  | MelodyParams
+  | BasslineParams
+  | DrumParams
+  | PadParams
+  | TextureParams
+  | null {
   if (state.generatorId === "arpeggio") return arpeggioParams(state);
   if (state.generatorId === "melody") return melodyParams(state);
   if (state.generatorId === "bassline") return basslineParams(state);
   if (state.generatorId === "drum-pattern") return drumParams(state);
   if (state.generatorId === "ambient-pad") return padParams(state);
+  if (state.generatorId === "texture") return textureParams(state);
   return null;
 }
 
@@ -439,6 +426,80 @@ function buildPadGrid(inputs: PreviewInputs): PadPreview {
   };
 }
 
+export function textureFields(
+  block: GeneratorBlock,
+): TextureParams["texture"] {
+  return {
+    noiseType: str(block, "noiseType") as TextureParams["texture"]["noiseType"],
+    filterType: str(block, "filterType") as TextureParams["texture"]["filterType"],
+    filterFrequency: num(block, "filterFrequency"),
+    movementRate: num(block, "movementRate"),
+    movementDepth: num(block, "movementDepth"),
+    crackle: num(block, "crackle"),
+  };
+}
+
+export function textureParams(state: StudioState): TextureParams {
+  return {
+    seed: state.seed,
+    tempo: state.tempo,
+    root: state.root,
+    scale: state.scale,
+    density: state.density,
+    swing: state.swing,
+    effects: state.effects,
+    texture: textureFields(state.blocks.texture),
+  };
+}
+
+/**
+ * The texture preview uses the same grid, paging and playhead as the other
+ * generators: time runs left to right, brightness picks the row and velocity
+ * makes the dot a little larger. The size is capped so a grain can never fill
+ * the cell and the scatter never looks cluttered.
+ */
+function buildTextureGrid(inputs: PreviewInputs): GridPreview {
+  const params: TextureParams = {
+    seed: inputs.seed,
+    tempo: inputs.tempo,
+    root: inputs.root,
+    scale: inputs.scale,
+    density: inputs.density,
+    swing: 0,
+    effects: {},
+    texture: textureFields(inputs.blocks.texture),
+  };
+  const result = generateTexture(params);
+  const rows = Math.max(1, GENERATOR_BY_ID.texture.rows);
+  const totalSteps = result.totalSteps;
+  const cells = Array.from({ length: rows * totalSteps }, () => false);
+  const notes: (GridNote | undefined)[] = Array.from(
+    { length: rows * totalSteps },
+    () => undefined,
+  );
+
+  for (const event of result.events) {
+    const fromBottom = clamp01(event.brightness);
+    const row = rows - 1 - Math.min(rows - 1, Math.round(fromBottom * (rows - 1)));
+    const index = row * totalSteps + event.step;
+    cells[index] = true;
+    notes[index] = {
+      velocity: clamp01(event.velocity) * 0.6,
+      duration: 0.18,
+    };
+  }
+
+  return {
+    kind: "grid",
+    rows,
+    totalSteps,
+    cells,
+    notes,
+    barEvery: 4,
+    duration: (totalSteps * 15) / inputs.tempo,
+  };
+}
+
 function buildMelodyGrid(inputs: PreviewInputs): GridPreview {
   const params: MelodyParams = {
     seed: inputs.seed,
@@ -474,7 +535,6 @@ function buildMelodyGrid(inputs: PreviewInputs): GridPreview {
 
 export function buildPreviewFrom(inputs: PreviewInputs): Preview {
   const rand = mulberry32(inputs.seed);
-  const block = inputs.blocks[inputs.generatorId];
 
   if (inputs.generatorId === "arpeggio") {
     return buildArpeggioGrid(inputs);
@@ -492,7 +552,7 @@ export function buildPreviewFrom(inputs: PreviewInputs): Preview {
     return buildPadGrid(inputs);
   }
   if (inputs.generatorId === "texture") {
-    return buildTexture(block, rand);
+    return buildTextureGrid(inputs);
   }
   return buildGrid(inputs, rand);
 }

@@ -24,14 +24,13 @@ const baseParams = (overrides: Partial<DrumParams> = {}): DrumParams => ({
 });
 
 const CASES: { name: string; params: DrumParams; hash: string }[] = [
-  { name: "seed-1", params: baseParams({ seed: 1 }), hash: "" },
-  { name: "seed-1839204412", params: baseParams(), hash: "" },
-  { name: "seed-9001", params: baseParams({ seed: 9001 }), hash: "" },
+  { name: "seed-1", params: baseParams({ seed: 1 }), hash: "af2f6567" },
+  { name: "seed-1839204412", params: baseParams(), hash: "a6fdc3cb" },
+  { name: "seed-9001", params: baseParams({ seed: 9001 }), hash: "99ad2313" },
 ];
 
 describe("drum event-list hash regression", () => {
-  it.each(CASES)("pins the event hash for $name", ({ params }) => {
-    const h = hashDrumEvents(generateDrums(params).steps.flat());
-    expect(h).toMatch(/^[0-9a-f]{8}$/);
+  it.each(CASES)("pins the event hash for $name", ({ params, hash }) => {
+    expect(hashDrumEvents(generateDrums(params).steps.flat())).toBe(hash);
   });
 });

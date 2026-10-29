@@ -5,14 +5,25 @@ import { generateBassline } from "./generators/bassline";
 import { drumStepLength, generateDrums } from "./generators/drums";
 import { generateMelody } from "./generators/melody";
 import { generatePads } from "./generators/pads";
+import { generateTexture } from "./generators/texture";
 import {
   buildDrumInstrument,
   drumInstrumentKeys,
   type DrumInstrument,
 } from "./drum-kit";
 import { stepSeconds } from "./theory";
+import {
+  buildTextureInstruments,
+  TEXTURE_VOICE_LEVEL,
+  type TextureInstrument,
+} from "./texture-kit";
 import { readDevFlags, type DevFlags } from "./dev-flags";
-import { hashDrumEvents, hashEvents, hashPadEvents } from "./hash";
+import {
+  hashDrumEvents,
+  hashEvents,
+  hashPadEvents,
+  hashTextureEvents,
+} from "./hash";
 import type { EffectId } from "../lib/studio-state";
 import type {
   AnyVoiceKind,
@@ -26,7 +37,15 @@ import type {
   NoteEvent,
   PadChordEvent,
   PadParams,
+  TextureEvent,
+  TextureParams,
+  TextureVoiceKind,
   Voice,
+} from "./types";
+import {
+  TEXTURE_VOICE_KINDS,
+  isAnyVoiceKind,
+  isTextureVoiceKind,
 } from "./types";
 
 export type StepListener = (step: number) => void;
@@ -56,7 +75,8 @@ export type EngineParams =
   | MelodyParams
   | BasslineParams
   | DrumParams
-  | PadParams;
+  | PadParams
+  | TextureParams;
 
 function isMelodyParams(params: EngineParams): params is MelodyParams {
   return "melody" in params;
@@ -74,11 +94,17 @@ function isPadParams(params: EngineParams): params is PadParams {
   return "pad" in params;
 }
 
+function isTextureParams(params: EngineParams): params is TextureParams {
+  return "texture" in params;
+}
+
 type StepItem = {
   index: number;
   note: NoteEvent | null;
   /** The drum lanes that sound on this step. */
   drums?: DrumEvent[];
+  /** The texture gestures that start on this step. */
+  texture?: TextureEvent[];
 };
 
 const TONE_LOOKAHEAD = 0.1;
@@ -345,6 +371,21 @@ function eventSignature(params: EngineParams): string {
       block.release,
     ].join("|");
   }
+  if (isTextureParams(params)) {
+    const block = params.texture;
+    // The noise type and filter are timbre only: they are applied live and
+    // never rebuild the event stream. Movement and crackle do shape events.
+    return [
+      "texture",
+      params.seed,
+      params.root,
+      params.scale,
+      params.density,
+      block.movementRate,
+      block.movementDepth,
+      block.crackle,
+    ].join("|");
+  }
   const block = params.arpeggio;
   return [
     "arpeggio",
@@ -387,10 +428,31 @@ export class ArpeggioEngine {
   private drumKit: DrumKitName | null = null;
   private drumLevels: Record<string, number> = {};
 
+  // The four texture families are persistent too. They are crossfaded through
+  // their level gains, exactly like the melodic voices.
+  private readonly textureInstruments: Record<
+    TextureVoiceKind,
+    TextureInstrument
+  >;
+  private textureLevels: Record<TextureVoiceKind, number> = {
+    dust: 0,
+    rain: 0,
+    shimmer: 0,
+    breath: 0,
+  };
+  private textureVoiceSignature = "";
+  private textureSettingsSignature = "";
+  private textureActive = false;
+
   private sequence: Tone.Sequence<StepItem> | null = null;
   private params: EngineParams | null = null;
-  private generatorId: "arpeggio" | "melody" | "bassline" | "drum-pattern" | "ambient-pad" =
-    "arpeggio";
+  private generatorId:
+    | "arpeggio"
+    | "melody"
+    | "bassline"
+    | "drum-pattern"
+    | "ambient-pad"
+    | "texture" = "arpeggio";
   private activeStepLength = "16n";
   private signature = "";
   private voiceSignature = "";
@@ -448,6 +510,7 @@ export class ArpeggioEngine {
 
     this.instruments = this.buildInstruments();
     this.buildDrumInstruments();
+    this.textureInstruments = buildTextureInstruments(this.chainInput);
 
     if (isDev) this.startMeterMonitor();
     this.startDriftMonitor();
@@ -561,6 +624,16 @@ export class ArpeggioEngine {
       }
     }
     this.drumInstruments.clear();
+
+    for (const kind of TEXTURE_VOICE_KINDS) {
+      for (const node of this.textureInstruments[kind].nodes) {
+        try {
+          node.dispose();
+        } catch {
+          // Already disposed.
+        }
+      }
+    }
 
     this.distortion.dispose();
     this.phaser.dispose();
@@ -894,6 +967,7 @@ export class ArpeggioEngine {
     transport.bpm.value = params.tempo;
     transport.swing = 0;
     this.applyEffects();
+    if (isTextureParams(params)) this.applyTextureSettings(params);
   }
 
   private applyEffects(): void {
@@ -1041,6 +1115,11 @@ export class ArpeggioEngine {
       this.buildPadSequence(params);
       return;
     }
+    if (isTextureParams(params)) {
+      this.buildTextureSequence(params);
+      return;
+    }
+    this.fadeTextureOut();
     const start = now();
     const melody = isMelodyParams(params);
     const bass = isBasslineParams(params);
@@ -1056,9 +1135,8 @@ export class ArpeggioEngine {
       : melody
         ? params.melody.noteLength
         : params.arpeggio.stepLength;
-    const finalVoice = this.flags.forcedVoice
-      ? FORCED_VOICES[this.flags.forcedVoice]
-      : voice;
+    const forced = this.flags.forcedVoice;
+    const finalVoice = forced && isAnyVoiceKind(forced) ? FORCED_VOICES[forced] : voice;
     const generated = now();
     this.applyVoice(finalVoice);
     this.disposeSequence();
@@ -1149,7 +1227,10 @@ export class ArpeggioEngine {
     this.generatorId = "ambient-pad";
     this.activeStepLength = "16n";
     // Apply a voice so levels get crossfaded on - use a soft voice for pads
-    this.applyVoice(this.flags.forcedVoice ? FORCED_VOICES[this.flags.forcedVoice] : FORCED_VOICES.soft);
+    const forced = this.flags.forcedVoice;
+    this.applyVoice(
+      forced && isAnyVoiceKind(forced) ? FORCED_VOICES[forced] : FORCED_VOICES.soft,
+    );
     this.disposeSequence();
     const items: StepItem[] = [];
     // Create steps across the timeline
@@ -1184,6 +1265,149 @@ export class ArpeggioEngine {
           `[ambient-pad] every voice gain is 0: the engine is silent`,
         );
       }
+    }
+  }
+
+  private buildTextureSequence(params: TextureParams): void {
+    const start = now();
+    const result = generateTexture(params);
+    this.generatorId = "texture";
+    this.activeStepLength = "16n";
+    this.applyTextureSettings(params);
+    this.applyTextureVoice();
+    this.disposeSequence();
+    const byStep: TextureEvent[][] = Array.from(
+      { length: result.totalSteps },
+      () => [],
+    );
+    for (const event of result.events) {
+      if (event.step >= 0 && event.step < byStep.length) {
+        byStep[event.step].push(event);
+      }
+    }
+    const items: StepItem[] = byStep.map((texture, index) => ({
+      index,
+      note: null,
+      texture,
+    }));
+    const sequence = new Tone.Sequence<StepItem>(
+      (time, item) => this.onTextureSequenceStep(time, item, params),
+      items,
+      "16n",
+    );
+    sequence.loop = true;
+    const transport = Tone.getTransport();
+    sequence.start(this.running ? transport.position : 0);
+    this.sequence = sequence;
+    const done = now();
+    if (isDev) {
+      console.debug(
+        `[texture] buildSequence seed=${params.seed} archetype=${result.archetype} sounding=${result.events.length} hash=${hashTextureEvents(result.events)} generate=${(done - start).toFixed(2)}ms total=${(done - start).toFixed(2)}ms ${contextInfo()}`,
+      );
+      if (result.events.length === 0) {
+        console.warn(
+          `[texture] no scheduled events: the pattern is empty, so nothing will sound`,
+        );
+      }
+      const allLevelsZero = TEXTURE_VOICE_KINDS.every(
+        (kind) => this.textureLevels[kind] <= 0,
+      );
+      if (allLevelsZero) {
+        console.warn(
+          `[texture] every texture voice gain is 0: the engine is silent`,
+        );
+      }
+    }
+  }
+
+  private onTextureSequenceStep(
+    time: number,
+    item: StepItem,
+    params: TextureParams,
+  ): void {
+    if (this.disposed) return;
+    const start = now();
+    if (this.onStep) {
+      const step = item.index;
+      Tone.getDraw().schedule(() => this.onStep?.(step), time);
+    }
+    const seconds = stepSeconds("16n", params.tempo);
+    const offset = item.index % 2 === 1 ? (params.swing * seconds) / 3 : 0;
+    const forced = this.flags.forcedVoice;
+    const forcedKind = forced && isTextureVoiceKind(forced) ? forced : null;
+    for (const event of item.texture ?? []) {
+      const kind = forcedKind ?? event.voice;
+      const instrument = this.textureInstruments[kind];
+      const startTime = Math.max(
+        time + offset,
+        Tone.now(),
+        this.lastNoteStart + SCHEDULE_EPSILON,
+      );
+      this.lastNoteStart = startTime;
+      instrument.trigger(
+        Tone.Frequency(event.pitch, "midi").toFrequency(),
+        Math.max(0.05, event.durationSteps * seconds),
+        startTime,
+        event.velocity,
+      );
+    }
+    if (isDev) {
+      const elapsed = now() - start;
+      if (elapsed > STEP_WARN_MS) {
+        console.warn(
+          `[texture] step ${item.index} callback ${elapsed.toFixed(2)}ms exceeds ${STEP_WARN_MS}ms`,
+        );
+      }
+    }
+  }
+
+  private applyTextureSettings(params: TextureParams): void {
+    const block = params.texture;
+    const signature = `${block.noiseType}|${block.filterType}|${block.filterFrequency}`;
+    if (signature === this.textureSettingsSignature) return;
+    this.textureSettingsSignature = signature;
+    for (const kind of TEXTURE_VOICE_KINDS) {
+      this.textureInstruments[kind].configure(block);
+    }
+    if (isDev) {
+      console.debug(
+        `[texture] timbre noise=${block.noiseType} filter=${block.filterType} frequency=${block.filterFrequency}Hz`,
+      );
+    }
+  }
+
+  private applyTextureVoice(): void {
+    const forced = this.flags.forcedVoice;
+    const forcedKind = forced && isTextureVoiceKind(forced) ? forced : null;
+    const signature = forcedKind ?? "mixed";
+    this.textureActive = true;
+    if (signature === this.textureVoiceSignature) return;
+    this.textureVoiceSignature = signature;
+    for (const kind of TEXTURE_VOICE_KINDS) {
+      const target = forcedKind
+        ? kind === forcedKind
+          ? TEXTURE_VOICE_LEVEL[kind]
+          : 0
+        : TEXTURE_VOICE_LEVEL[kind];
+      this.textureLevels[kind] = target;
+      const gain = this.textureInstruments[kind].level.gain;
+      gain.cancelScheduledValues(Tone.now());
+      gain.rampTo(target, VOICE_FADE);
+    }
+    if (isDev) {
+      console.debug(`[texture] voice=${forcedKind ?? "mixed"}`);
+    }
+  }
+
+  private fadeTextureOut(): void {
+    if (!this.textureActive) return;
+    this.textureActive = false;
+    this.textureVoiceSignature = "";
+    for (const kind of TEXTURE_VOICE_KINDS) {
+      this.textureLevels[kind] = 0;
+      const gain = this.textureInstruments[kind].level.gain;
+      gain.cancelScheduledValues(Tone.now());
+      gain.rampTo(0, VOICE_FADE);
     }
   }
 

@@ -90,29 +90,6 @@ function Pad({ preview }: { preview: Extract<Preview, { kind: "pad" }> }) {
   );
 }
 
-function Texture({
-  preview,
-}: {
-  preview: Extract<Preview, { kind: "texture" }>;
-}) {
-  return (
-    <div className="tx">
-      {preview.bars.map((bar, index) => (
-        <i
-          key={index}
-          style={
-            {
-              "--h": `${bar.height}%`,
-              "--s": `${bar.duration}s`,
-              "--dl": `${bar.delay}s`,
-            } as CSSProperties
-          }
-        />
-      ))}
-    </div>
-  );
-}
-
 export function PatternPreview({
   preview,
   playheadRef,
@@ -160,7 +137,6 @@ export function PatternPreview({
       </div>
       <div className="in" role="img" aria-label={alt}>
         {preview.kind === "pad" && <Pad preview={preview} />}
-        {preview.kind === "texture" && <Texture preview={preview} />}
         {preview.kind === "grid" && (
           <Grid preview={preview} page={activePage} />
         )}

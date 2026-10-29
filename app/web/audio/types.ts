@@ -1,3 +1,4 @@
+import type { TexturePattern } from "@gms/shared";
 import type { NoteName, ScaleName, StudioEffects } from "../lib/studio-state";
 
 export const ARPEGGIO_STEPS = 64;
@@ -440,3 +441,66 @@ export type PadResult = {
   voice: PadVoice;
   archetype: PadArchetypeId;
 };
+
+// --- Texture ---------------------------------------------------------------
+
+export const TEXTURE_ARCHETYPES = [
+  "dust-grains",
+  "rain-pulse",
+  "shimmer-swells",
+  "breath-noise",
+  "metallic-drips",
+  "granular-cloud",
+] as const;
+
+export type TextureArchetypeId = (typeof TEXTURE_ARCHETYPES)[number];
+
+export const TEXTURE_VOICE_KINDS = [
+  "dust",
+  "rain",
+  "shimmer",
+  "breath",
+] as const;
+
+export type TextureVoiceKind = (typeof TEXTURE_VOICE_KINDS)[number];
+
+/** The texture block is defined once, in the shared create-pattern schema. */
+export type TextureParams = TexturePattern["params"];
+
+export type TextureEvent = {
+  /** 0-based sixteenth-note step. */
+  step: number;
+  /** MIDI pitch used by the tonal voices; the noise voices ignore it. */
+  pitch: number;
+  /** 0..1 brightness / centre of the noise filter. */
+  brightness: number;
+  /** 0..1, bounded so grains stay quiet. */
+  velocity: number;
+  /** Length in sixteenth-note steps, always at least 1. */
+  durationSteps: number;
+  /** The persistent instrument family this gesture belongs to. */
+  voice: TextureVoiceKind;
+};
+
+export type TextureResult = {
+  events: TextureEvent[];
+  archetype: TextureArchetypeId;
+  totalSteps: number;
+  stepsPerBar: number;
+};
+
+/** Voice kinds accepted by `?voice=`; texture adds its own family. */
+export const ALL_FORCED_VOICE_KINDS = [
+  ...ALL_VOICE_KINDS,
+  ...TEXTURE_VOICE_KINDS,
+] as const;
+
+export type ForcedVoiceKind = (typeof ALL_FORCED_VOICE_KINDS)[number];
+
+export function isAnyVoiceKind(value: string): value is AnyVoiceKind {
+  return (ALL_VOICE_KINDS as readonly string[]).includes(value);
+}
+
+export function isTextureVoiceKind(value: string): value is TextureVoiceKind {
+  return (TEXTURE_VOICE_KINDS as readonly string[]).includes(value);
+}

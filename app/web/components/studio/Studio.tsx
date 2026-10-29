@@ -21,6 +21,7 @@ import {
   type MelodyParams,
   type NoteLength,
   type PadParams,
+  type TextureParams,
 } from "@/audio/types";
 import {
   ApiError,
@@ -261,7 +262,13 @@ export function Studio({ initialPattern }: StudioProps = {}) {
   }, [stepHandler]);
 
   async function startPlayback(
-    params: ArpeggioParams | MelodyParams | BasslineParams | DrumParams | PadParams,
+    params:
+      | ArpeggioParams
+      | MelodyParams
+      | BasslineParams
+      | DrumParams
+      | PadParams
+      | TextureParams,
   ) {
     const tone = toneRef.current ?? (await import("tone"));
     toneRef.current = tone;
@@ -460,9 +467,6 @@ export function Studio({ initialPattern }: StudioProps = {}) {
         </span>
       );
     }
-    if (!supported) {
-      return "Coming soon — saving is disabled for this voice.";
-    }
     return validationMessage;
   }
 
@@ -539,7 +543,8 @@ export function Studio({ initialPattern }: StudioProps = {}) {
               state.generatorId === "melody" ||
               state.generatorId === "bassline" ||
               state.generatorId === "drum-pattern" ||
-              state.generatorId === "ambient-pad"
+              state.generatorId === "ambient-pad" ||
+              state.generatorId === "texture"
             }
             page={page}
             onSelectPage={handleSelectPage}

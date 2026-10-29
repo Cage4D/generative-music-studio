@@ -1,10 +1,10 @@
 import { EFFECT_IDS, type EffectId } from "../lib/studio-state";
-import { ALL_VOICE_KINDS, type AnyVoiceKind } from "./types";
+import { ALL_FORCED_VOICE_KINDS, type ForcedVoiceKind } from "./types";
 
 export type DevFlags = {
   fxOff: boolean;
   removedFx: EffectId[];
-  forcedVoice: AnyVoiceKind | null;
+  forcedVoice: ForcedVoiceKind | null;
   drawOff: boolean;
 };
 
@@ -44,8 +44,8 @@ export function readDevFlags(): DevFlags {
       fxOff,
       removedFx,
       forcedVoice:
-        voice && (ALL_VOICE_KINDS as readonly string[]).includes(voice)
-          ? (voice as AnyVoiceKind)
+        voice && (ALL_FORCED_VOICE_KINDS as readonly string[]).includes(voice)
+          ? (voice as ForcedVoiceKind)
           : null,
       drawOff: params.get("draw") === "off",
     };
