@@ -1,0 +1,52 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "api": {
+      "root": "app/api",
+      "framework": "nestjs",
+      "entrypoint": "src/main.ts",
+      "installCommand": "pnpm install --frozen-lockfile --prod=false",
+      "buildCommand": "pnpm run build",
+      "routes": [
+        {
+          "src": "/api/(.*)",
+          "transforms": [
+            {
+              "type": "request.path",
+              "op": "set",
+              "args": "/$1"
+            }
+          ]
+        }
+      ]
+    },
+    "web": {
+      "root": "app/web",
+      "framework": "nextjs",
+      "installCommand": "pnpm install --frozen-lockfile --prod=false",
+      "buildCommand": "pnpm run build",
+      "bindings": [
+        {
+          "type": "service",
+          "service": "api",
+          "format": "url",
+          "env": "API_URL"
+        }
+      ]
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": {
+        "service": "api"
+      }
+    },
+    {
+      "source": "/(.*)",
+      "destination": {
+        "service": "web"
+      }
+    }
+  ]
+}

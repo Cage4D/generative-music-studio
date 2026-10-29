@@ -44,10 +44,19 @@ export const DEFAULT_TIMEOUT_MS = 20_000;
 export const DEFAULT_RETRIES = 2;
 export const RETRY_BASE_MS = 500;
 
+function trimBase(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
 export function apiBaseUrl(): string {
-  const raw = process.env.NEXT_PUBLIC_API_URL;
-  const base = raw && raw.trim() ? raw.trim() : DEFAULT_API_URL;
-  return base.replace(/\/+$/, "");
+  const internal = process.env.API_URL;
+  if (typeof window === "undefined" && internal && internal.trim()) {
+    return trimBase(internal.trim());
+  }
+
+  const publicUrl = process.env.NEXT_PUBLIC_API_URL;
+  const base = publicUrl && publicUrl.trim() ? publicUrl.trim() : DEFAULT_API_URL;
+  return trimBase(base);
 }
 
 export function shareUrl(slug: string, origin: string): string {

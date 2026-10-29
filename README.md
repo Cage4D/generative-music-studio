@@ -228,7 +228,14 @@ Audio is the one thing the automated tests can't judge. The review process for e
 
 ## Deploying
 
-The whole stack can run as one **Vercel** project using [Vercel Services](https://vercel.com/docs/services), with **Neon** for Postgres. `app/vercel.json` defines two services: `web` (Next.js) and `api` (NestJS). The API is exposed at `/api` and the service strips that prefix before NestJS sees the request.
+The whole stack can run as one **Vercel** project using [Vercel Services](https://vercel.com/docs/services), with **Neon** for Postgres. The root `vercel.json` defines two services:
+
+| Service | Root | Public path | Notes |
+| --- | --- | --- | --- |
+| `web` | `app/web` | `/` | Calls `api` through the injected `API_URL` binding; the browser uses `/api`. |
+| `api` | `app/api` | `/api` | The `/api` prefix is stripped before NestJS sees the request. |
+
+The API stays publicly reachable at `/api`, but server-side Next.js calls use the internal service binding instead of going back through the public domain. Vercel injects `API_URL` into the web service; do not set it yourself.
 
 1. **Neon.** Create a project and copy both connection strings: the **pooled** URL for the running API, and the **direct** URL for migrations.
 2. **Migrate.** From `app/`, apply the schema once with the direct URL:
@@ -238,12 +245,12 @@ The whole stack can run as one **Vercel** project using [Vercel Services](https:
    ```
 
    Run this again whenever the Prisma schema changes. Vercel builds do not run migrations.
-3. **Vercel.** New Project → Root Directory `app`. Vercel reads `app/vercel.json` and builds both services. Set these environment variables for Production (and Preview if you deploy previews):
+3. **Vercel.** New Project → leave the Root Directory at the repository root. Vercel reads `vercel.json` and builds both services. Set these environment variables for Production (and Preview if you deploy previews):
 
    | Variable | Value |
    | --- | --- |
    | `DATABASE_URL` | Neon pooled connection string |
-   | `NEXT_PUBLIC_API_URL` | `https://<your-domain>/api` |
+   | `NEXT_PUBLIC_API_URL` | `/api` |
    | `NEXT_PUBLIC_SITE_URL` | `https://<your-domain>` |
    | `CORS_ORIGINS` | `https://<your-domain>` |
    | `TRUST_PROXY` | `1` |

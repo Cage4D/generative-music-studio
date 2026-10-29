@@ -75,6 +75,17 @@ describe("apiBaseUrl", () => {
     vi.stubEnv("NEXT_PUBLIC_API_URL", "https://api.example.test/");
     expect(apiBaseUrl()).toBe("https://api.example.test");
   });
+
+  it("prefers the internal API service binding on the server", () => {
+    vi.stubEnv("API_URL", "http://api.internal:3000/");
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "/api");
+    expect(apiBaseUrl()).toBe("http://api.internal:3000");
+  });
+
+  it("uses the relative public API path in the browser", () => {
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "/api/");
+    expect(apiBaseUrl()).toBe("/api");
+  });
 });
 
 describe("shareUrl", () => {
