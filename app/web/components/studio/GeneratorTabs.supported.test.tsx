@@ -9,8 +9,8 @@ import {
 import type { GeneratorId } from "@gms/shared";
 import { GeneratorTabs } from "./GeneratorTabs";
 
-const COMING_SOON: GeneratorId[] = ["ambient-pad", "texture"];
-const SUPPORTED: GeneratorId[] = ["arpeggio", "melody", "bassline", "drum-pattern"];
+const COMING_SOON: GeneratorId[] = ["texture"];
+const SUPPORTED: GeneratorId[] = ["arpeggio", "melody", "bassline", "drum-pattern", "ambient-pad"];
 
 function tabFor(id: GeneratorId): HTMLElement {
   const generator = GENERATORS.find((entry) => entry.id === id);
@@ -79,5 +79,25 @@ describe("generator support", () => {
     expect(saveDisabledFor("bassline", false, false)).toBe(true);
     expect(saveDisabledFor("drum-pattern", true, true)).toBe(true);
     expect(saveDisabledFor("drum-pattern", false, false)).toBe(true);
+  });
+});
+
+describe("ambient-pad tab behavior", () => {
+  it("renders ambient-pad without soon label and allows saving while texture is still coming soon", () => {
+    const { unmount: unmountPad } = render(<GeneratorTabs activeId="ambient-pad" onSelect={() => {}} />);
+    const padTab = tabFor("ambient-pad");
+    expect(padTab.textContent).not.toMatch(/soon/i);
+    expect(padTab.querySelector(".soon")).toBeNull();
+    expect(isGeneratorSupported("ambient-pad")).toBe(true);
+    expect(saveDisabledFor("ambient-pad", true, false)).toBe(false);
+    unmountPad();
+
+    const { unmount: unmountTexture } = render(<GeneratorTabs activeId="texture" onSelect={() => {}} />);
+    const texTab = tabFor("texture");
+    expect(texTab.textContent).toMatch(/soon/i);
+    expect(texTab.querySelector(".soon")).not.toBeNull();
+    expect(isGeneratorSupported("texture")).toBe(false);
+    expect(saveDisabledFor("texture", true, false)).toBe(true);
+    unmountTexture();
   });
 });

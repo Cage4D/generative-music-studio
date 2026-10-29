@@ -378,3 +378,65 @@ export type DrumResult = {
   /** The lanes that sound at least once. */
   lanes: DrumLane[];
 };
+
+
+// --- Ambient Pad -----------------------------------------------------------
+
+export const PAD_ARCHETYPES = [
+  "drifting-triads",
+  "suspended-clouds",
+  "open-fifths",
+  "slow-arp-swells",
+  "modal-shift",
+  "drone-plus-colour-tones",
+] as const;
+
+export type PadArchetypeId = (typeof PAD_ARCHETYPES)[number];
+
+export const PAD_VOICE_KINDS = [
+  "warm",
+  "glass",
+  "airy",
+  "soft-organ",
+] as const;
+
+export type PadVoiceKind = (typeof PAD_VOICE_KINDS)[number];
+
+export type PadBlock = {
+  waveform: Waveform;
+  chordSize: number;
+  voicing: "close" | "open" | "wide";
+  chordLengthBars: number;
+  attack: number;
+  release: number;
+  drift: number;
+};
+
+export type PadParams = {
+  seed: number;
+  tempo: number;
+  root: NoteName;
+  scale: ScaleName;
+  density: number;
+  swing: number;
+  effects: StudioEffects;
+  pad: PadBlock;
+};
+
+export type PadChordEvent = {
+  step: number;
+  pitches: number[]; // list of MIDI notes in the chord
+  velocity: number;
+  durationSteps: number;
+};
+
+export type PadVoice = {
+  kind: PadVoiceKind;
+  gain: number;
+};
+
+export type PadResult = {
+  events: PadChordEvent[];
+  voice: PadVoice;
+  archetype: PadArchetypeId;
+};

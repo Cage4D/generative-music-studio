@@ -20,6 +20,7 @@ import {
   type DrumParams,
   type MelodyParams,
   type NoteLength,
+  type PadParams,
 } from "@/audio/types";
 import {
   ApiError,
@@ -260,7 +261,7 @@ export function Studio({ initialPattern }: StudioProps = {}) {
   }, [stepHandler]);
 
   async function startPlayback(
-    params: ArpeggioParams | MelodyParams | BasslineParams | DrumParams,
+    params: ArpeggioParams | MelodyParams | BasslineParams | DrumParams | PadParams,
   ) {
     const tone = toneRef.current ?? (await import("tone"));
     toneRef.current = tone;
@@ -537,7 +538,8 @@ export function Studio({ initialPattern }: StudioProps = {}) {
               state.generatorId === "arpeggio" ||
               state.generatorId === "melody" ||
               state.generatorId === "bassline" ||
-              state.generatorId === "drum-pattern"
+              state.generatorId === "drum-pattern" ||
+              state.generatorId === "ambient-pad"
             }
             page={page}
             onSelectPage={handleSelectPage}

@@ -4,6 +4,7 @@ import { generateArpeggio } from "./generators/arpeggio";
 import { generateBassline } from "./generators/bassline";
 import { drumStepLength, generateDrums } from "./generators/drums";
 import { generateMelody } from "./generators/melody";
+import { generatePads } from "./generators/pads";
 import {
   buildDrumInstrument,
   drumInstrumentKeys,
@@ -11,7 +12,7 @@ import {
 } from "./drum-kit";
 import { stepSeconds } from "./theory";
 import { readDevFlags, type DevFlags } from "./dev-flags";
-import { hashDrumEvents, hashEvents } from "./hash";
+import { hashDrumEvents, hashEvents, hashPadEvents } from "./hash";
 import type { EffectId } from "../lib/studio-state";
 import type {
   AnyVoiceKind,
@@ -23,6 +24,8 @@ import type {
   DrumParams,
   MelodyParams,
   NoteEvent,
+  PadChordEvent,
+  PadParams,
   Voice,
 } from "./types";
 
@@ -52,7 +55,8 @@ export type EngineParams =
   | ArpeggioParams
   | MelodyParams
   | BasslineParams
-  | DrumParams;
+  | DrumParams
+  | PadParams;
 
 function isMelodyParams(params: EngineParams): params is MelodyParams {
   return "melody" in params;
@@ -64,6 +68,10 @@ function isBasslineParams(params: EngineParams): params is BasslineParams {
 
 function isDrumParams(params: EngineParams): params is DrumParams {
   return "drums" in params;
+}
+
+function isPadParams(params: EngineParams): params is PadParams {
+  return "pad" in params;
 }
 
 type StepItem = {
@@ -321,6 +329,22 @@ function eventSignature(params: EngineParams): string {
       block.hatDensity,
     ].join("|");
   }
+  if (isPadParams(params)) {
+    const block = params.pad;
+    return [
+      "ambient-pad",
+      params.seed,
+      params.root,
+      params.scale,
+      params.density,
+      block.waveform,
+      block.chordSize,
+      block.voicing,
+      block.chordLengthBars,
+      block.attack,
+      block.release,
+    ].join("|");
+  }
   const block = params.arpeggio;
   return [
     "arpeggio",
@@ -365,7 +389,7 @@ export class ArpeggioEngine {
 
   private sequence: Tone.Sequence<StepItem> | null = null;
   private params: EngineParams | null = null;
-  private generatorId: "arpeggio" | "melody" | "bassline" | "drum-pattern" =
+  private generatorId: "arpeggio" | "melody" | "bassline" | "drum-pattern" | "ambient-pad" =
     "arpeggio";
   private activeStepLength = "16n";
   private signature = "";
@@ -1013,6 +1037,10 @@ export class ArpeggioEngine {
       this.buildDrumSequence(params);
       return;
     }
+    if (isPadParams(params)) {
+      this.buildPadSequence(params);
+      return;
+    }
     const start = now();
     const melody = isMelodyParams(params);
     const bass = isBasslineParams(params);
@@ -1108,6 +1136,97 @@ export class ArpeggioEngine {
       if (allLevelsZero) {
         console.warn(
           `[drum-pattern] every drum lane gain is 0: the engine is silent`,
+        );
+      }
+    }
+  }
+
+
+
+  private buildPadSequence(params: PadParams): void {
+    const start = now();
+    const result = generatePads(params);
+    this.generatorId = "ambient-pad";
+    this.activeStepLength = "16n";
+    // Apply a voice so levels get crossfaded on - use a soft voice for pads
+    this.applyVoice(this.flags.forcedVoice ? FORCED_VOICES[this.flags.forcedVoice] : FORCED_VOICES.soft);
+    this.disposeSequence();
+    const items: StepItem[] = [];
+    // Create steps across the timeline
+    const totalSteps = 128; // 8 bars * 16
+    for (let i = 0; i < totalSteps; i++) {
+      items.push({ index: i, note: null });
+    }
+    const sequence = new Tone.Sequence<StepItem>(
+      (time, item) => this.onPadSequenceStep(time, item, result.events, params),
+      items,
+      "16n",
+    );
+    sequence.loop = true;
+    const transport = Tone.getTransport();
+    sequence.start(this.running ? transport.position : 0);
+    this.sequence = sequence;
+    const done = now();
+    if (isDev) {
+      console.debug(
+        `[ambient-pad] buildSequence seed=${params.seed} archetype=${result.archetype} sounding=${result.events.reduce((a, e) => a + e.pitches.length, 0)} hash=${hashPadEvents(result.events)} generate=${(done - start).toFixed(2)}ms total=${(done - start).toFixed(2)}ms ${contextInfo()}`,
+      );
+      if (result.events.length === 0) {
+        console.warn(
+          `[ambient-pad] no scheduled events: the pattern is empty, so nothing will sound`,
+        );
+      }
+      const allLevelsZero = Object.values(this.intendedLevels).every(
+        (level) => (level ?? 0) <= 0,
+      );
+      if (allLevelsZero) {
+        console.warn(
+          `[ambient-pad] every voice gain is 0: the engine is silent`,
+        );
+      }
+    }
+  }
+
+  private onPadSequenceStep(time: number, item: StepItem, events: PadChordEvent[], params: PadParams): void {
+    if (this.disposed) return;
+    const start = now();
+    if (this.onStep) {
+      const step = item.index;
+      Tone.getDraw().schedule(() => this.onStep?.(step), time);
+    }
+    // Find events starting at this step (16n steps)
+    for (const ev of events) {
+      if (ev.step === item.index) {
+        // Trigger chord
+        const secondsPerStep = 60 / params.tempo / 4; // 16n
+        const duration = Math.max(0.5, ev.durationSteps * secondsPerStep * 2); // long release
+        const vel = Math.max(0.01, ev.velocity || 0.5);
+        // Use the soft/lead synths for pads - route through chain
+        const instr = this.activeKind ? this.instruments[this.activeKind] : (this.instruments["soft"] || this.instruments["pluck"]);
+        // Try to use available instruments
+        if (instr) {
+          for (let i = 0; i < ev.pitches.length; i++) {
+            const startTime = Math.max(time, Tone.now() + 0.001, this.lastNoteStart + SCHEDULE_EPSILON);
+            this.lastNoteStart = startTime + 0.0005;
+            try {
+              instr.source.triggerAttackRelease(
+                Tone.Frequency(ev.pitches[i], "midi").toFrequency(),
+                duration,
+                startTime,
+                vel / Math.max(1, ev.pitches.length),
+              );
+            } catch {
+              // ignore
+            }
+          }
+        }
+      }
+    }
+    if (isDev) {
+      const elapsed = now() - start;
+      if (elapsed > STEP_WARN_MS) {
+        console.warn(
+          `[ambient-pad] step ${item.index} callback ${elapsed.toFixed(2)}ms exceeds ${STEP_WARN_MS}ms`,
         );
       }
     }

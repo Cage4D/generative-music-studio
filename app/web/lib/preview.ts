@@ -4,6 +4,7 @@ import {
   generateBassline,
 } from "../audio/generators/bassline";
 import { generateDrums } from "../audio/generators/drums";
+import { generatePads } from "../audio/generators/pads";
 import { generateMelody } from "../audio/generators/melody";
 import {
   ARPEGGIO_STEPS,
@@ -22,6 +23,8 @@ import {
   type NoteLength,
   type StepLength,
   type Waveform,
+  type PadBlock,
+  type PadParams,
 } from "../audio/types";
 import { mulberry32 } from "./prng";
 import { GENERATOR_BY_ID } from "./generators";
@@ -75,21 +78,6 @@ const num = (block: GeneratorBlock, key: string): number => Number(block[key]);
 const str = (block: GeneratorBlock, key: string): string => String(block[key]);
 const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
 
-function buildPad(block: GeneratorBlock, tempo: number, rand: () => number): PadPreview {
-  const chordLengthBars = num(block, "chordLengthBars");
-  const chordSize = num(block, "chordSize");
-  const count = Math.ceil(8 / chordLengthBars);
-
-  const blocks = Array.from({ length: count }, () => {
-    const bars = Array.from({ length: chordSize }, () => {
-      const width = 40 + rand() * 60;
-      return { width, marginLeft: rand() * (100 - width) };
-    });
-    return { flex: chordLengthBars, bars };
-  });
-
-  return { kind: "pad", duration: 1920 / tempo, blocks };
-}
 
 function buildTexture(
   block: GeneratorBlock,
@@ -387,12 +375,68 @@ function buildDrumGrid(inputs: PreviewInputs): GridPreview {
 
 export function engineParamsFor(
   state: StudioState,
-): ArpeggioParams | MelodyParams | BasslineParams | DrumParams | null {
+): ArpeggioParams | MelodyParams | BasslineParams | DrumParams | PadParams | null {
   if (state.generatorId === "arpeggio") return arpeggioParams(state);
   if (state.generatorId === "melody") return melodyParams(state);
   if (state.generatorId === "bassline") return basslineParams(state);
   if (state.generatorId === "drum-pattern") return drumParams(state);
+  if (state.generatorId === "ambient-pad") return padParams(state);
   return null;
+}
+
+
+export function padFields(block: GeneratorBlock): PadBlock {
+  return {
+    waveform: str(block, "waveform") as Waveform,
+    chordSize: num(block, "chordSize"),
+    voicing: str(block, "voicing") as PadBlock["voicing"],
+    chordLengthBars: num(block, "chordLengthBars"),
+    attack: num(block, "attack"),
+    release: num(block, "release"),
+    drift: num(block, "drift"),
+  };
+}
+
+export function padParams(state: StudioState): PadParams {
+  return {
+    seed: state.seed,
+    tempo: state.tempo,
+    root: state.root,
+    scale: state.scale,
+    density: state.density,
+    swing: state.swing,
+    effects: state.effects,
+    pad: padFields(state.blocks["ambient-pad"]),
+  };
+}
+
+function buildPadGrid(inputs: PreviewInputs): PadPreview {
+  const params: PadParams = {
+    seed: inputs.seed,
+    tempo: inputs.tempo,
+    root: inputs.root,
+    scale: inputs.scale,
+    density: inputs.density,
+    swing: 0,
+    effects: {},
+    pad: padFields(inputs.blocks["ambient-pad"]),
+  };
+  const result = generatePads(params);
+  const blocks = result.events.slice(0, 4).map((ev, i) => ({
+    flex: Math.max(1, ev.durationSteps / 16),
+    bars: Array.from({ length: Math.max(1, Math.min(4, ev.pitches.length)) }, () => ({
+      width: 30 + (inputs.seed % 40),
+      marginLeft: (i * 15) % 40,
+    })),
+  }));
+  if (blocks.length === 0) {
+    blocks.push({ flex: 2, bars: [{ width: 40, marginLeft: 10 }] });
+  }
+  return {
+    kind: "pad",
+    duration: (1920 / inputs.tempo),
+    blocks,
+  };
 }
 
 function buildMelodyGrid(inputs: PreviewInputs): GridPreview {
@@ -445,7 +489,7 @@ export function buildPreviewFrom(inputs: PreviewInputs): Preview {
     return buildDrumGrid(inputs);
   }
   if (inputs.generatorId === "ambient-pad") {
-    return buildPad(block, inputs.tempo, rand);
+    return buildPadGrid(inputs);
   }
   if (inputs.generatorId === "texture") {
     return buildTexture(block, rand);

@@ -187,6 +187,7 @@ export const SUPPORTED_GENERATOR_IDS = [
   "melody",
   "bassline",
   "drum-pattern",
+  "ambient-pad",
 ] as const satisfies readonly GeneratorId[];
 
 export function isGeneratorSupported(generatorId: GeneratorId): boolean {
