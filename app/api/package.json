@@ -7,7 +7,7 @@
   "license": "UNLICENSED",
   "type": "module",
   "scripts": {
-    "build": "pnpm --filter @gms/shared build && pnpm run prisma:generate && nest build",
+    "build": "pnpm --filter @gms/shared build && pnpm run prisma:generate && nest build && node ./scripts/write-dist-package.mjs",
     "clean:dist": "rm -rf dist tsconfig.build.tsbuildinfo",
     "prisma:generate": "prisma generate",
     "prisma:deploy": "prisma migrate deploy",

@@ -1,7 +1,10 @@
-import "dotenv/config";
 import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module.js";
 import { parseCorsOrigins, parsePort, parseTrustProxy } from "./config.js";
+
+if (process.env.NODE_ENV !== "production") {
+  await import("dotenv/config");
+}
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);

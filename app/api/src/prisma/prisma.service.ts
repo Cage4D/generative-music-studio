@@ -1,4 +1,4 @@
-import { Injectable, type OnModuleInit } from "@nestjs/common";
+import { Injectable, Logger, type OnModuleInit } from "@nestjs/common";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../generated/prisma/client.js";
 
@@ -21,19 +21,32 @@ export function sanitizeConnectionString(connectionString: string): string {
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit {
+  private readonly logger = new Logger(PrismaService.name);
+  private readonly connectionString: string | undefined;
+
   constructor() {
     const connectionString = process.env.DATABASE_URL;
-    if (!connectionString) {
-      throw new Error("DATABASE_URL is not set. Did you create api/.env?");
-    }
     super({
       adapter: new PrismaPg({
-        connectionString: sanitizeConnectionString(connectionString),
+        connectionString: sanitizeConnectionString(connectionString ?? ""),
       }),
     });
+    this.connectionString = connectionString;
+    if (!connectionString) {
+      this.logger.error(
+        "DATABASE_URL is not set. Database-backed endpoints will be unavailable.",
+      );
+    }
   }
 
   async onModuleInit(): Promise<void> {
-    await this.$connect();
+    if (!this.connectionString) return;
+    try {
+      await this.$connect();
+    } catch (error) {
+      this.logger.error(
+        `Failed to connect to the database: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 }
