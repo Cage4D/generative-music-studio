@@ -42,6 +42,7 @@ app/api/src/generated/
 
 # vercel
 .vercel
+.api-deploy/
 
 # typescript
 *.tsbuildinfo
