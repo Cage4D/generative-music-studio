@@ -86,6 +86,18 @@ describe("apiBaseUrl", () => {
     vi.stubEnv("NEXT_PUBLIC_API_URL", "/api/");
     expect(apiBaseUrl()).toBe("/api");
   });
+
+  it("defaults deployed browsers to the same-origin API path", () => {
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "");
+    vi.stubGlobal("window", { location: { hostname: "app.example.test" } });
+    expect(apiBaseUrl()).toBe("/api");
+  });
+
+  it("ignores a localhost public API URL when deployed", () => {
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://localhost:4000");
+    vi.stubGlobal("window", { location: { hostname: "app.example.test" } });
+    expect(apiBaseUrl()).toBe("/api");
+  });
 });
 
 describe("shareUrl", () => {

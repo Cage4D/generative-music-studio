@@ -48,14 +48,38 @@ function trimBase(value: string): string {
   return value.replace(/\/+$/, "");
 }
 
+function isLocalHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  return (
+    normalized === "localhost" ||
+    normalized === "127.0.0.1" ||
+    normalized === "::1"
+  );
+}
+
+function isLocalBaseUrl(value: string): boolean {
+  try {
+    return isLocalHostname(new URL(value).hostname);
+  } catch {
+    return false;
+  }
+}
+
 export function apiBaseUrl(): string {
   const internal = process.env.API_URL;
   if (typeof window === "undefined" && internal && internal.trim()) {
     return trimBase(internal.trim());
   }
 
-  const publicUrl = process.env.NEXT_PUBLIC_API_URL;
-  const base = publicUrl && publicUrl.trim() ? publicUrl.trim() : DEFAULT_API_URL;
+  const publicUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
+  const hostname =
+    typeof window === "undefined" ? null : window.location.hostname;
+
+  if (hostname && !isLocalHostname(hostname)) {
+    if (!publicUrl || isLocalBaseUrl(publicUrl)) return "/api";
+  }
+
+  const base = publicUrl || DEFAULT_API_URL;
   return trimBase(base);
 }
 
