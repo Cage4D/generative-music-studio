@@ -237,19 +237,13 @@ The whole stack can run as one **Vercel** project using [Vercel Services](https:
 
 The API stays publicly reachable at `/api`, but server-side Next.js calls use the internal service binding instead of going back through the public domain. Vercel injects `API_URL` into the web service; do not set it yourself.
 
-1. **Neon.** Create a project and copy both connection strings: the **pooled** URL for the running API, and the **direct** URL for migrations.
-2. **Migrate.** From `app/`, apply the schema once with the direct URL:
-
-   ```bash
-   DATABASE_URL="postgresql://...direct..." pnpm prisma:deploy
-   ```
-
-   Run this again whenever the Prisma schema changes. Vercel builds do not run migrations.
-3. **Vercel.** New Project → leave the Root Directory at the repository root. Vercel reads `vercel.json` and builds both services. Set these environment variables for Production (and Preview if you deploy previews):
+1. **Neon.** Create a project and copy both connection strings: the **pooled** URL for API traffic, and the **direct** URL for migrations.
+2. **Vercel.** New Project → leave the Root Directory at the repository root. Vercel reads `vercel.json` and builds both services. Set these environment variables for Production (and Preview if you deploy previews):
 
    | Variable | Value |
    | --- | --- |
    | `DATABASE_URL` | Neon pooled connection string |
+   | `DATABASE_URL_UNPOOLED` | Neon direct connection string for migrations |
    | `NEXT_PUBLIC_API_URL` | `/api` |
    | `NEXT_PUBLIC_SITE_URL` | `https://<your-domain>` |
    | `CORS_ORIGINS` | `https://<your-domain>` |
@@ -257,7 +251,7 @@ The API stays publicly reachable at `/api`, but server-side Next.js calls use th
    | `RATE_LIMIT_MAX` | `120` |
    | `RATE_LIMIT_WINDOW_MS` | `60000` |
 
-4. **Verify.** Open `https://<your-domain>/api/health`, then save a track and open its share link.
+3. **Migrate and verify.** Production API builds apply pending migrations using `DATABASE_URL_UNPOOLED`; Preview builds do not run migrations. Open `https://<your-domain>/api/health`, then save a track and open its share link. For local or manually managed migrations, run `DATABASE_URL="postgresql://...direct..." pnpm prisma:deploy` from `app/`.
 
 The rate limiter is in-memory and therefore per function instance on Vercel. Treat it as a best-effort backstop; use Vercel Firewall or a shared Redis/Upstash limiter if you need a hard global limit. `render.yaml` remains available if you prefer a long-running API instead.
 

@@ -1,28 +1,43 @@
-import { NestFactory } from "@nestjs/core";
-import { AppModule } from "./app.module.js";
-import { parseCorsOrigins, parsePort, parseTrustProxy } from "./config.js";
+console.info("[api] entrypoint loaded", { nodeVersion: process.version });
 
 if (process.env.NODE_ENV !== "production") {
   await import("dotenv/config");
 }
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  let phase = "load-dependencies";
+  try {
+    const [{ NestFactory }, { AppModule }, config] = await Promise.all([
+      import("@nestjs/core"),
+      import("./app.module.js"),
+      import("./config.js"),
+    ]);
+    console.info("[api] dependencies loaded");
 
-  const origins = parseCorsOrigins(process.env.CORS_ORIGINS);
-  app.enableCors({
-    origin: origins,
-    credentials: true,
-    methods: ["GET", "POST", "OPTIONS"],
-  });
+    phase = "create-app";
+    const app = await NestFactory.create(AppModule);
+    console.info("[api] Nest application created");
 
-  // The service runs behind Render (and optionally a CDN). Trusting the proxy
-  // hop makes `request.ip` the real client IP, which is what the rate limiter
-  // keys on.
-  app.getHttpAdapter().getInstance().set("trust proxy", parseTrustProxy(process.env.TRUST_PROXY));
+    const origins = config.parseCorsOrigins(process.env.CORS_ORIGINS);
+    app.enableCors({
+      origin: origins,
+      credentials: true,
+      methods: ["GET", "POST", "OPTIONS"],
+    });
 
-  const port = parsePort(process.env.PORT);
-  await app.listen(port, "0.0.0.0");
-  console.log(`API listening on 0.0.0.0:${port} (cors: ${origins.join(", ")})`);
+    // Trust the Vercel/Render proxy hop so the rate limiter sees the real IP.
+    app
+      .getHttpAdapter()
+      .getInstance()
+      .set("trust proxy", config.parseTrustProxy(process.env.TRUST_PROXY));
+
+    const port = config.parsePort(process.env.PORT);
+    phase = "listen";
+    await app.listen(port);
+    console.info("[api] listener ready", { port });
+  } catch (error) {
+    console.error(`[api] bootstrap failed during ${phase}`, error);
+    throw error;
+  }
 }
-await bootstrap();
+void bootstrap();

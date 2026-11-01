@@ -6,17 +6,11 @@
       "framework": "nestjs",
       "entrypoint": "src/main.ts",
       "installCommand": "pnpm install --frozen-lockfile",
-      "buildCommand": "pnpm run build",
-      "routes": [
+      "buildCommand": "pnpm run build:vercel",
+      "rewrites": [
         {
-          "src": "/api/(.*)",
-          "transforms": [
-            {
-              "type": "request.path",
-              "op": "set",
-              "args": "/$1"
-            }
-          ]
+          "source": "/api/:path(.*)?",
+          "destination": "/:path"
         }
       ]
     },
