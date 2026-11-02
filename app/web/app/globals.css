@@ -259,6 +259,11 @@ main {
   padding: 36px 24px 40px;
 }
 
+main > section,
+main > aside {
+  min-width: 0;
+}
+
 .card {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -272,6 +277,9 @@ main {
   width: max-content;
   max-width: 100%;
   overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -545,6 +553,12 @@ h1 {
 .sd label {
   color: var(--mut);
   font-size: 12px;
+}
+
+.seed-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 input[type="number"],
@@ -889,11 +903,20 @@ aside > .card:nth-child(2) {
 
   main {
     grid-template-columns: 1fr;
+    gap: 20px;
     padding: 24px 16px 32px;
   }
 
   #vis {
     height: 260px;
+  }
+
+  /* Keep the wave ribbons at their natural aspect ratio. Without this the
+     fixed-height SVG is stretched sideways on narrow screens, compressing
+     the curves into a tight zig-zag. */
+  .waves svg {
+    width: max(200%, calc(52vh * 7.2));
+    width: max(200%, calc(52dvh * 7.2));
   }
 
   .tag {
@@ -914,14 +937,217 @@ aside > .card:nth-child(2) {
     width: auto;
   }
 
+  .track {
+    padding: 40px 16px 48px;
+  }
+
+  .track .card {
+    padding: 24px;
+  }
+
   .ft {
     padding: 16px;
   }
 }
 
-@media (max-width: 420px) {
+/* Phones: tighten the page shell and prevent controls from competing for
+   horizontal space. */
+@media (max-width: 600px) {
+  header {
+    gap: 8px;
+    padding: 10px 14px;
+  }
+
+  .logo {
+    gap: 8px;
+    font-size: 11.5px;
+    letter-spacing: 0.08em;
+  }
+
+  .logo svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  nav {
+    gap: 0;
+  }
+
+  nav a {
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+
+  main {
+    gap: 16px;
+    padding: 20px 12px 28px;
+  }
+
+  #generator-panel h1 {
+    font-size: 34px;
+  }
+
+  .lede {
+    font-size: 14.5px;
+    margin-bottom: 18px;
+  }
+
+  .chips {
+    margin-bottom: 20px;
+  }
+
+  .tabs {
+    gap: 2px;
+    padding: 3px;
+    margin-bottom: 20px;
+  }
+
+  .tab {
+    padding: 7px 12px;
+  }
+
+  .tp {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 10px 12px;
+    padding: 14px;
+  }
+
+  #play {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    align-self: start;
+    width: 48px;
+    height: 48px;
+  }
+
+  .sd {
+    display: grid;
+    grid-column: 2;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px;
+    align-items: center;
+    width: auto;
+  }
+
+  .seed-actions {
+    display: flex;
+    grid-column: 1 / -1;
+    gap: 8px;
+  }
+
+  .seed-actions .btn {
+    flex: 1;
+    justify-content: center;
+  }
+
+  #vis {
+    height: 240px;
+    margin-bottom: 12px;
+  }
+
+  .vh {
+    padding: 10px 12px;
+  }
+
+  #vis .in {
+    margin: 12px 10px;
+  }
+
+  .g {
+    gap: 3px;
+  }
+
+  .card {
+    padding: 14px;
+  }
+
+  details {
+    padding: 14px 16px;
+  }
+
+  .save {
+    padding: 16px;
+    margin-top: 12px;
+  }
+
+  #out {
+    font-size: 12px;
+  }
+
+  .track {
+    padding: 28px 12px 40px;
+  }
+
+  .track .card {
+    padding: 20px 16px;
+  }
+
+  .ft {
+    padding: 14px 16px 20px;
+  }
+}
+
+/* Small phones: give sliders their own row and strip non-essential nav. */
+@media (max-width: 480px) {
+  .logo {
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+  }
+
+  .logo svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  nav .off {
+    display: none;
+  }
+
+  #generator-panel h1 {
+    font-size: 32px;
+  }
+
+  .lede {
+    font-size: 14px;
+  }
+
+  .chip {
+    padding: 3px 9px;
+    font-size: 11px;
+  }
+
   .r {
-    grid-template-columns: 84px 1fr 40px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 10px;
+    margin: 12px 0;
+  }
+
+  .r label {
+    grid-column: 1;
+  }
+
+  .r output {
+    grid-column: 2;
+  }
+
+  .r input[type="range"] {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .r select {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .g {
+    gap: 2px;
+  }
+
+  .ft {
+    flex-direction: column;
+    gap: 4px;
   }
 }
 
@@ -940,16 +1166,21 @@ aside > .card:nth-child(2) {
 @media (pointer: coarse) {
   .tab,
   nav a,
-  .btn,
-  summary {
+  .btn {
     min-height: 44px;
     display: inline-flex;
     align-items: center;
   }
 
+  summary {
+    min-height: 44px;
+  }
+
   .pages button {
+    display: inline-flex;
     min-width: 44px;
     min-height: 44px;
+    align-items: center;
     justify-content: center;
   }
 }

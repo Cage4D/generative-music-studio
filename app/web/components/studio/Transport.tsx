@@ -42,22 +42,24 @@ export function Transport({
           value={seed}
           onChange={(event) => onSeedChange(Number(event.target.value))}
         />
-        <button
-          type="button"
-          className="btn"
-          aria-label="Shuffle seed"
-          onClick={onShuffle}
-        >
-          Shuffle
-        </button>
-        <button
-          type="button"
-          className="btn"
-          aria-label="Copy seed"
-          onClick={onCopySeed}
-        >
-          Copy
-        </button>
+        <div className="seed-actions">
+          <button
+            type="button"
+            className="btn"
+            aria-label="Shuffle seed"
+            onClick={onShuffle}
+          >
+            Shuffle
+          </button>
+          <button
+            type="button"
+            className="btn"
+            aria-label="Copy seed"
+            onClick={onCopySeed}
+          >
+            Copy
+          </button>
+        </div>
         <span className="sr-only" role="status" aria-live="polite">
           {seedCopied ? "Seed copied to clipboard" : ""}
         </span>
